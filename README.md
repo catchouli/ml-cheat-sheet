@@ -23,6 +23,8 @@ It goes from plain maths, to how neural networks learn, to transformers:
 
 **Attention** covers queries, keys and values, the causal mask, multi-head attention and the backward pass.
 
+**Position encoding** goes from the sine waves in the original transformer paper, through learned embeddings and relative biases, to RoPE.
+
 ## How it works
 
 It's plain HTML and CSS, with formulas written in LaTeX and rendered in the browser by [KaTeX](https://katex.org/), so there's no build step. Pushing to `main` deploys it to GitHub Pages.

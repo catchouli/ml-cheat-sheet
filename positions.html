@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Position encoding · ML Cheat Sheet</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js" onload="renderMathInElement(document.body)"></script>
+</head>
+<body>
+  <header class="site-header">
+    <nav>
+      <a class="home" href="index.html">ML Cheat Sheet</a>
+      <a href="math.html">Math</a>
+      <a href="gradient-descent.html">Gradient descent</a>
+      <a href="layers.html">Layers</a>
+      <a href="layernorm.html">LayerNorm</a>
+      <a href="attention.html">Attention</a>
+      <a href="positions.html" aria-current="page">Positions</a>
+    </nav>
+  </header>
+
+  <div class="page with-toc">
+    <nav class="toc" aria-label="On this page">
+      <h2>On this page</h2>
+      <ol>
+        <li><a href="#why">Why it's needed</a></li>
+        <li><a href="#sinusoidal">Sinusoidal (2017)</a></li>
+        <li><a href="#learned">Learned embeddings</a></li>
+        <li><a href="#relative">Relative biases</a></li>
+        <li><a href="#rope">RoPE</a>
+          <ol>
+            <li><a href="#rope-rotation">The rotation</a></li>
+            <li><a href="#rope-relative">Why it's relative</a></li>
+            <li><a href="#rope-pairs">Pairing dimensions</a></li>
+            <li><a href="#rope-long">Longer contexts</a></li>
+            <li><a href="#rope-2d">2D RoPE for images</a></li>
+          </ol>
+        </li>
+        <li><a href="#comparison">Comparison</a></li>
+      </ol>
+    </nav>
+
+    <main>
+      <h1>Position encoding</h1>
+      <p class="lede">How a transformer knows the order of its tokens, from the original sine waves to RoPE.</p>
+
+      <!-- ============================================================ -->
+      <h2 id="why">Why it's needed</h2>
+      <p><a href="attention.html">Attention</a> sees its input as a set: shuffle the tokens and each output just moves with its token. Without extra information, “dog bites man” and “man bites dog” look the same. (The causal mask leaks a little order, but not enough to rely on.)</p>
+      <p>There are two broad approaches:</p>
+      <ul>
+        <li><strong>Absolute:</strong> give each position its own vector and add it to the token embedding at the input. Sinusoidal and learned embeddings work like this.</li>
+        <li><strong>Relative:</strong> change the attention scores so they depend on the distance between query and key, \(t - j\). RoPE, ALiBi and T5's bias work like this. Most current models use RoPE.</li>
+      </ul>
+
+      <!-- ============================================================ -->
+      <h2 id="sinusoidal">Sinusoidal (2017)</h2>
+      <p>From the original transformer paper (Vaswani et al., Google, “Attention Is All You Need”). Each position \(p\) gets a fixed vector of size \(d\), added to the token embedding:</p>
+      <div class="result">
+        \[ PE_{(p,\, 2i)} = \sin\!\left( \frac{p}{10000^{2i/d}} \right) \qquad PE_{(p,\, 2i+1)} = \cos\!\left( \frac{p}{10000^{2i/d}} \right) \]
+        \[ x_p = \text{embedding}(\text{token}_p) + PE_p \]
+      </div>
+      <p>Each pair of dimensions \((2i, 2i+1)\) is a point going round a circle as \(p\) increases, like the hand of a clock, at angular speed \(\omega_i = 10000^{-2i/d}\). The first pair turns 1 radian per position; the last turns about 10000 times slower. Together they work like the digits of a number: fast ones distinguish neighbours, slow ones tell far-apart positions apart.</p>
+
+      <figure class="diagram">
+        <svg id="pe-heatmap" viewBox="0 0 636 322" role="img" aria-label="Heatmap of sinusoidal position encodings for 48 positions and 32 dimensions: the first dimensions oscillate quickly along the position axis, later ones slowly"></svg>
+        <figcaption>\(PE\) for 48 positions and \(d = 32\). Each column is one position's vector. The top rows (fast clocks) flip sign every few positions; the bottom rows barely change across the whole range.</figcaption>
+      </figure>
+
+      <p><strong>Why sines and cosines:</strong> moving \(k\) positions along rotates each pair by a fixed angle, \(k\omega_i\), whatever \(p\) is. So \(PE_{p+k}\) is a linear function of \(PE_p\), which the authors hoped would make relative positions easy to learn:</p>
+      \[ \begin{pmatrix} \sin\bigl((p + k)\omega\bigr) \\ \cos\bigl((p + k)\omega\bigr) \end{pmatrix} = \begin{pmatrix} \cos k\omega & \sin k\omega \\ -\sin k\omega & \cos k\omega \end{pmatrix} \begin{pmatrix} \sin p\omega \\ \cos p\omega \end{pmatrix} \]
+      <p>No parameters, and it's defined for any position, though in practice models don't generalise well past the lengths they were trained on. The paper also scales the token embeddings by \(\sqrt{d}\) before adding, so the position signal doesn't drown them out.</p>
+
+      <!-- ============================================================ -->
+      <h2 id="learned">Learned embeddings</h2>
+      <p>Simpler still: a second embedding table, indexed by position instead of token, learned like any other weight.</p>
+      <div class="result">
+        \[ x_p = \text{tok\_emb}[\text{token}_p] + \text{pos\_emb}[p] \qquad \text{pos\_emb}: T_{\max} \times C \]
+      </div>
+<pre><code>self.pos_emb = nn.Embedding(block_size, d_model)
+x = self.tok_emb(idx) + self.pos_emb(torch.arange(T, device=idx.device))  # (B, T, C), broadcast over B</code></pre>
+      <p>The original paper tried this too and found it worked about as well as sinusoidal. It's what BERT, GPT-2 and GPT-3 use, and what CatGPT's stage 4 uses. The catch: there's nothing for position \(T_{\max}\) and beyond, so the context length is fixed at training time, and each position is learned separately, so the model has to learn that positions 7 and 8 are neighbours.</p>
+
+      <!-- ============================================================ -->
+      <h2 id="relative">Relative biases</h2>
+      <p>Instead of changing the inputs, add a bias to each attention score that depends only on the distance \(t - j\):</p>
+      \[ S_{tj} = \frac{q_t \cdot k_j}{\sqrt{d}} + b(t - j) \]
+      <div class="table-wrap">
+        <table class="formulas">
+          <tr><th>Method</th><th>Bias \(b(t - j)\)</th><th>Used by</th></tr>
+          <tr><td>T5 relative bias</td><td>A learned scalar per head for each distance, with distances grouped into buckets that get wider further away.</td><td>T5</td></tr>
+          <tr><td>ALiBi</td><td>Fixed, no parameters: \(-m_h\,(t - j)\), a straight-line penalty on distance with a different slope \(m_h\) per head.</td><td>BLOOM, MPT</td></tr>
+        </table>
+      </div>
+      <p>ALiBi in particular extrapolates well to sequences longer than it was trained on, because a longer distance just means a bigger penalty.</p>
+
+      <!-- ============================================================ -->
+      <h2 id="rope">RoPE</h2>
+      <p><strong>Rotary position embedding</strong> (Su et al., 2021). Used by LLaMA, Mistral, Qwen, Gemma, GPT-NeoX and most current LLMs. Instead of adding anything, rotate each query and key by an angle proportional to its position. It's applied inside every attention layer, to \(q\) and \(k\) only (not \(v\), and not the residual stream).</p>
+
+      <h3 id="rope-rotation">The rotation</h3>
+      <p>Split the head's \(d\) dimensions into \(d/2\) pairs. Pair \(i\) gets its own frequency, the same spectrum as the sinusoidal encoding:</p>
+      \[ \theta_i = b^{-2i/d}, \quad i = 0, \dots, \tfrac{d}{2} - 1 \qquad (b = 10000 \text{ usually}) \]
+      <p>At position \(m\), rotate each pair by the angle \(m\theta_i\), using the 2D rotation matrix:</p>
+      <div class="result">
+        \[ \begin{pmatrix} x'_{2i} \\ x'_{2i+1} \end{pmatrix} = \begin{pmatrix} \cos m\theta_i & -\sin m\theta_i \\ \sin m\theta_i & \cos m\theta_i \end{pmatrix} \begin{pmatrix} x_{2i} \\ x_{2i+1} \end{pmatrix} \]
+      </div>
+      <p>Written out without the matrix:</p>
+      \[ x'_{2i} = x_{2i} \cos m\theta_i - x_{2i+1} \sin m\theta_i \qquad x'_{2i+1} = x_{2i} \sin m\theta_i + x_{2i+1} \cos m\theta_i \]
+      <p>The whole vector's rotation \(R_m\) is block-diagonal: \(d/2\) independent 2D rotations, each turning at its own speed. Rotations don't change length, so \(\lVert R_m x \rVert = \lVert x \rVert\).</p>
+      <p><strong>As complex numbers:</strong> treat pair \(i\) as \(z_i = x_{2i} + \mathrm{i}\, x_{2i+1}\). Then rotating is just multiplying: \(z'_i = z_i \, e^{\mathrm{i} m \theta_i}\).</p>
+
+      <h3 id="rope-relative">Why it's relative</h3>
+      <p>Query at position \(m\), key at position \(n\). Rotating one by \(m\theta\) and the other by \(n\theta\) changes the angle between them by \((n - m)\theta\):</p>
+      <div class="result">
+        \[ (R_m q)^\top (R_n k) = q^\top R_m^\top R_n\, k = q^\top R_{n - m}\, k \]
+      </div>
+      <p>since \(R_m^\top = R_{-m}\) (rotating back) and rotations add: \(R_{-m} R_n = R_{n-m}\). The score depends on the two vectors' content and their <strong>distance</strong> \(n - m\), never on the absolute positions.</p>
+
+      <figure class="diagram small">
+        <svg viewBox="0 0 440 230" style="max-width: 30rem" role="img" aria-label="Two panels: q at position 2 and k at position 5, then q at position 6 and k at position 9. Both pairs are rotated to different absolute angles, but the angle between q and k is the same in both.">
+          <defs>
+            <marker id="ar-q" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" style="fill: var(--accent)"/></marker>
+            <marker id="ar-k" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" style="fill: var(--grad)"/></marker>
+          </defs>
+          <g>
+            <line class="cell-off" x1="20" y1="100" x2="180" y2="100"/><line class="cell-off" x1="100" y1="20" x2="100" y2="180"/>
+            <path class="grad-line" style="stroke: var(--muted); stroke-dasharray: none; stroke-width: 1.5" d="M118.0,78.6 A28,28 0 0 0 75.8,86.0"/>
+            <line class="fwd-line" x1="100" y1="100" x2="145.0" y2="46.4" marker-end="url(#ar-q)"/><text class="fwd" x="150" y="44">q</text>
+            <line class="fwd-line" style="stroke: var(--grad)" x1="100" y1="100" x2="39.4" y2="65.0" marker-end="url(#ar-k)"/><text class="grad" x="24" y="62">k</text>
+            <text x="100" y="205" text-anchor="middle">m = 2, n = 5</text>
+          </g>
+          <g transform="translate(220 0)">
+            <line class="cell-off" x1="20" y1="100" x2="180" y2="100"/><line class="cell-off" x1="100" y1="20" x2="100" y2="180"/>
+            <path class="grad-line" style="stroke: var(--muted); stroke-dasharray: none; stroke-width: 1.5" d="M82.0,78.6 A28,28 0 0 0 82.0,121.4"/>
+            <line class="fwd-line" x1="100" y1="100" x2="55.0" y2="46.4" marker-end="url(#ar-q)"/><text class="fwd" x="42" y="42">q</text>
+            <line class="fwd-line" style="stroke: var(--grad)" x1="100" y1="100" x2="55.0" y2="153.6" marker-end="url(#ar-k)"/><text class="grad" x="42" y="168">k</text>
+            <text x="100" y="205" text-anchor="middle">m = 6, n = 9</text>
+          </g>
+        </svg>
+        <figcaption>One pair of dimensions. Both pairs of positions are 3 apart, so the angle between the rotated \(q\) and \(k\), and therefore their dot product, is the same, even though everything has turned.</figcaption>
+      </figure>
+
+      <p>Because the fast pairs wrap round quickly and the slow pairs barely move, the model can use fast pairs for “what's nearby” and slow pairs for long-range matching. And unlike learned embeddings, there's no table to run off the end of.</p>
+
+      <h3 id="rope-pairs">Pairing dimensions</h3>
+      <p>The paper pairs <strong>adjacent</strong> dimensions, \((x_0, x_1), (x_2, x_3), \dots\). Many implementations (GPT-NeoX, LLaMA in Hugging Face, CatGPT's stage 7 hint) instead pair each dimension with the one <strong>half a vector away</strong>, \((x_i, x_{i + d/2})\), because it's easier to vectorise:</p>
+      \[ x' = x \odot \cos + \operatorname{rotate\_half}(x) \odot \sin \qquad \operatorname{rotate\_half}\bigl([x_1;\, x_2]\bigr) = [-x_2;\, x_1] \]
+      <p>where \(x_1, x_2\) are the two halves of \(x\), and \(\cos\), \(\sin\) hold \(\cos m\theta_i\) and \(\sin m\theta_i\) with the \(d/2\) angles repeated twice (<code>cat([angles, angles])</code>). For each \(i\) that gives \(x'_i = x_i \cos - x_{i+d/2} \sin\) and \(x'_{i+d/2} = x_{i+d/2} \cos + x_i \sin\): the same rotation, on a different choice of pairs.</p>
+      <div class="note">
+        <p>The two layouts are equally good for training from scratch, since the learned \(W_Q\), \(W_K\) can produce either ordering. But weights trained with one <strong>don't work with the other</strong>, which is a classic bug when loading someone else's checkpoint.</p>
+      </div>
+      <p>The rotation is the same for every head, and positions come from the sequence index. With a <a href="attention.html#causal">KV cache</a>, the new queries' positions continue from where the cache ends, not from 0.</p>
+
+      <h3 id="rope-long">Longer contexts</h3>
+      <p>Positions beyond the training length produce angles the slow pairs never saw. Common fixes, all of which stretch the slow frequencies:</p>
+      <div class="table-wrap">
+        <table class="formulas">
+          <tr><th>Method</th><th>Idea</th></tr>
+          <tr><td>Position interpolation</td><td>Divide positions by the extension factor, so a longer sequence maps back into the trained range of angles. Needs a little fine-tuning.</td></tr>
+          <tr><td>Larger base</td><td>Raise \(b\) (Llama 3 uses 500,000), so every pair turns more slowly. “NTK-aware” scaling does this by a rule.</td></tr>
+          <tr><td>YaRN</td><td>Leaves the fast pairs alone, interpolates the slow ones, and blends in between.</td></tr>
+        </table>
+      </div>
+
+      <h3 id="rope-2d">2D RoPE for images</h3>
+      <p>Image patches have a row and a column rather than a single position. The usual (“axial”) 2D RoPE splits each head's dimensions in two: one half is rotated using the patch's row index, the other half using its column index, each with ordinary 1D RoPE. The score then depends on the vertical and horizontal offsets between patches.</p>
+
+      <!-- ============================================================ -->
+      <h2 id="comparison">Comparison</h2>
+      <div class="table-wrap">
+        <table class="formulas">
+          <tr><th>Method</th><th>Where</th><th>Parameters</th><th>Relative?</th><th>Longer than trained?</th><th>Used by</th></tr>
+          <tr><td>Sinusoidal</td><td>Added to input</td><td>None</td><td>No</td><td>Defined, works poorly</td><td>Original Transformer</td></tr>
+          <tr><td>Learned</td><td>Added to input</td><td>\(T_{\max} \times C\)</td><td>No</td><td>No</td><td>BERT, GPT-2, GPT-3</td></tr>
+          <tr><td>T5 bias</td><td>Attention scores</td><td>Per head, per bucket</td><td>Yes</td><td>Somewhat</td><td>T5</td></tr>
+          <tr><td>ALiBi</td><td>Attention scores</td><td>None</td><td>Yes</td><td>Well</td><td>BLOOM, MPT</td></tr>
+          <tr><td>RoPE</td><td>Rotates \(q\), \(k\) in every layer</td><td>None</td><td>Yes</td><td>With scaling</td><td>LLaMA, Mistral, Qwen, Gemma</td></tr>
+        </table>
+      </div>
+    </main>
+  </div>
+
+  <script>
+    // Draw the sinusoidal heatmap from the formula, rather than storing 1500 rects.
+    (function () {
+      const svg = document.getElementById("pe-heatmap");
+      const NS = "http://www.w3.org/2000/svg";
+      const P = 48, D = 32, cw = 12, ch = 8, ox = 40, oy = 26;
+      const el = (tag, attrs, text) => {
+        const e = document.createElementNS(NS, tag);
+        for (const k in attrs) e.setAttribute(k, attrs[k]);
+        if (text) e.textContent = text;
+        svg.appendChild(e);
+      };
+      el("text", { class: "muted", x: ox + (P * cw) / 2, y: 14, "text-anchor": "middle" }, "position p →");
+      el("text", { class: "muted", x: 16, y: oy + (D * ch) / 2, "text-anchor": "middle", transform: `rotate(90 16 ${oy + (D * ch) / 2})` }, "dimension →");
+      for (let p = 0; p < P; p++) {
+        for (let j = 0; j < D; j++) {
+          const angle = p / Math.pow(10000, (2 * Math.floor(j / 2)) / D);
+          const v = j % 2 === 0 ? Math.sin(angle) : Math.cos(angle);
+          el("rect", { class: v >= 0 ? "cell-on" : "cell-neg", x: ox + p * cw, y: oy + j * ch, width: cw, height: ch, opacity: Math.abs(v).toFixed(2) });
+        }
+      }
+      const ly = oy + D * ch + 24;
+      el("rect", { class: "cell-on", x: ox, y: ly - 9, width: 12, height: 10 });
+      el("text", { class: "muted", x: ox + 18, y: ly }, "+1");
+      el("rect", { class: "cell-neg", x: ox + 60, y: ly - 9, width: 12, height: 10 });
+      el("text", { class: "muted", x: ox + 78, y: ly }, "−1");
+    })();
+  </script>
+</body>
+</html>
