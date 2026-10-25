@@ -1,0 +1,284 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Math · ML Cheat Sheet</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js" onload="renderMathInElement(document.body)"></script>
+</head>
+<body>
+  <header class="site-header">
+    <nav>
+      <a class="home" href="index.html">ML Cheat Sheet</a>
+      <a href="math.html" aria-current="page">Math</a>
+      <a href="backprop.html">Backprop</a>
+      <a href="attention.html">Attention</a>
+    </nav>
+  </header>
+
+  <div class="page with-toc">
+    <nav class="toc" aria-label="On this page">
+      <h2>On this page</h2>
+      <ol>
+        <li><a href="#basics">Exponents and logs</a>
+          <ol>
+            <li><a href="#inverses">exp and log are inverses</a></li>
+            <li><a href="#exponent-rules">Exponent rules</a></li>
+            <li><a href="#log-rules">Log rules</a></li>
+          </ol>
+        </li>
+        <li><a href="#sums">Sums and products</a></li>
+        <li><a href="#calculus">Calculus</a>
+          <ol>
+            <li><a href="#derivative-definitions">Definitions</a></li>
+            <li><a href="#common-derivatives">Common derivatives</a></li>
+            <li><a href="#derivative-rules">Derivative rules</a></li>
+            <li><a href="#power-rule">Power rule</a></li>
+            <li><a href="#chain-rule">Chain rule</a></li>
+            <li><a href="#partial-derivatives">Partial derivatives</a></li>
+            <li><a href="#multivariable-chain-rule">Multivariable chain rule</a></li>
+          </ol>
+        </li>
+      </ol>
+    </nav>
+
+    <main>
+      <h1>Math</h1>
+      <p class="lede">The bits of school and university maths that keep coming up in ML.</p>
+
+      <!-- ============================================================ -->
+      <h2 id="basics">Exponents and logs</h2>
+
+      <div class="note">
+        <p>\(\ln x\) is \(\log_e x\), the natural log. In ML papers and code, plain \(\log\) almost always means \(\ln\) too: <code>np.log</code>, <code>torch.log</code> and <code>math.log</code> are all base \(e\).</p>
+      </div>
+
+      <h3 id="inverses">exp and log are inverses</h3>
+      \[ e^{\ln x} = x \quad (x \gt 0) \qquad\qquad \ln\!\left(e^{x}\right) = x \]
+      <p>The same holds for any base \(b\):</p>
+      \[ b^{\log_b x} = x \qquad\qquad \log_b\!\left(b^{x}\right) = x \]
+      <p>So \(\log_b x\) answers “what power do I raise \(b\) to, to get \(x\)?”. \(\ln\) is only defined for \(x \gt 0\), and \(e^x \gt 0\) for every \(x\).</p>
+
+      <h3 id="exponent-rules">Exponent rules</h3>
+      <div class="table-wrap">
+        <table class="formulas">
+          <tr><th>Rule</th><th>Formula</th></tr>
+          <tr><td>Product</td><td class="math-cell">\(a^m \cdot a^n = a^{m+n}\)</td></tr>
+          <tr><td>Quotient</td><td class="math-cell">\(\dfrac{a^m}{a^n} = a^{m-n}\)</td></tr>
+          <tr><td>Power of a power</td><td class="math-cell">\(\left(a^m\right)^n = a^{mn}\)</td></tr>
+          <tr><td>Power of a product</td><td class="math-cell">\((ab)^n = a^n b^n\)</td></tr>
+          <tr><td>Power of a quotient</td><td class="math-cell">\(\left(\dfrac{a}{b}\right)^n = \dfrac{a^n}{b^n}\)</td></tr>
+          <tr><td>Zero power</td><td class="math-cell">\(a^0 = 1\)</td></tr>
+          <tr><td>Negative power</td><td class="math-cell">\(a^{-n} = \dfrac{1}{a^n}\)</td></tr>
+          <tr><td>Fractional power</td><td class="math-cell">\(a^{1/n} = \sqrt[n]{a} \qquad a^{m/n} = \sqrt[n]{a^m}\)</td></tr>
+          <tr><td>With \(e\)</td><td class="math-cell">\(e^{x+y} = e^x e^y \qquad e^{x-y} = \dfrac{e^x}{e^y}\)</td></tr>
+        </table>
+      </div>
+
+      <h3 id="log-rules">Log rules</h3>
+      <p>Each one is an exponent rule seen through the log. They hold for any base.</p>
+      <div class="table-wrap">
+        <table class="formulas">
+          <tr><th>Rule</th><th>Formula</th></tr>
+          <tr><td>Product</td><td class="math-cell">\(\log(ab) = \log a + \log b\)</td></tr>
+          <tr><td>Quotient</td><td class="math-cell">\(\log\!\left(\dfrac{a}{b}\right) = \log a - \log b\)</td></tr>
+          <tr><td>Power</td><td class="math-cell">\(\log\!\left(a^n\right) = n \log a\)</td></tr>
+          <tr><td>Reciprocal</td><td class="math-cell">\(\log\!\left(\dfrac{1}{a}\right) = -\log a\)</td></tr>
+          <tr><td>Log of 1</td><td class="math-cell">\(\log 1 = 0\)</td></tr>
+          <tr><td>Change of base</td><td class="math-cell">\(\log_b x = \dfrac{\ln x}{\ln b}\)</td></tr>
+        </table>
+      </div>
+
+      <div class="example">
+        <span class="label">Example: log of a softmax</span>
+        <p>With \(m = \max_k z_k\), the quotient rule, then \(\ln(e^x) = x\):</p>
+        \[
+        \begin{aligned}
+        \ln\!\left(\frac{e^{z_j - m}}{\sum_k e^{z_k - m}}\right)
+          &= \ln\!\left(e^{z_j - m}\right) - \ln \sum_k e^{z_k - m} \\
+          &= (z_j - m) - \ln \sum_k e^{z_k - m}
+        \end{aligned}
+        \]
+        <p>No \(e^x\) is ever taken and then logged again, so nothing underflows to \(\ln 0\).</p>
+      </div>
+
+      <!-- ============================================================ -->
+      <h2 id="sums">Sums and products</h2>
+
+      <div class="table-wrap">
+        <table class="formulas">
+          <tr><th>Name</th><th>Formula</th></tr>
+          <tr><td>Sum</td><td class="math-cell">\(\displaystyle\sum_{i=1}^{n} x_i = x_1 + x_2 + \dots + x_n\)</td></tr>
+          <tr><td>Product</td><td class="math-cell">\(\displaystyle\prod_{i=1}^{n} x_i = x_1 \cdot x_2 \cdots x_n\)</td></tr>
+          <tr><td>Constant out</td><td class="math-cell">\(\displaystyle\sum_i c\,x_i = c \sum_i x_i\)</td></tr>
+          <tr><td>Split a sum</td><td class="math-cell">\(\displaystyle\sum_i (x_i + y_i) = \sum_i x_i + \sum_i y_i\)</td></tr>
+          <tr><td>Sum of a constant</td><td class="math-cell">\(\displaystyle\sum_{i=1}^{n} c = nc\)</td></tr>
+          <tr><td>Swap double sums</td><td class="math-cell">\(\displaystyle\sum_i \sum_j a_{ij} = \sum_j \sum_i a_{ij}\)</td></tr>
+          <tr><td>Log of a product</td><td class="math-cell">\(\displaystyle\log \prod_i x_i = \sum_i \log x_i\)</td></tr>
+          <tr><td>Mean</td><td class="math-cell">\(\displaystyle\mu = \frac{1}{n}\sum_{i=1}^{n} x_i\)</td></tr>
+          <tr><td>Variance (biased, ÷n)</td><td class="math-cell">\(\displaystyle\sigma^2 = \frac{1}{n}\sum_{i=1}^{n} (x_i - \mu)^2 = \frac{1}{n}\sum_{i=1}^{n} x_i^2 - \mu^2\)</td></tr>
+          <tr><td>Dot product</td><td class="math-cell">\(\displaystyle a \cdot b = \sum_i a_i b_i\)</td></tr>
+          <tr><td>Matrix product</td><td class="math-cell">\(\displaystyle (AB)_{ij} = \sum_k A_{ik} B_{kj}\)</td></tr>
+          <tr><td>Log-sum-exp</td><td class="math-cell">\(\displaystyle\log \sum_i e^{x_i} = m + \log \sum_i e^{x_i - m}, \quad m = \max_i x_i\)</td></tr>
+        </table>
+      </div>
+
+      <div class="note">
+        <p><strong>Log of a product</strong> is why ML works with log-likelihoods: a product of thousands of probabilities underflows to 0, but the sum of their logs is a normal number.</p>
+      </div>
+
+      <!-- ============================================================ -->
+      <h2 id="calculus">Calculus</h2>
+
+      <h3 id="derivative-definitions">Definitions</h3>
+      <div class="table-wrap">
+        <table class="formulas">
+          <tr><th>Name</th><th>Formula</th></tr>
+          <tr><td>Derivative</td><td class="math-cell">\(\displaystyle f'(x) = \frac{df}{dx} = \lim_{h \to 0} \frac{f(x+h) - f(x)}{h}\)</td></tr>
+          <tr><td>Central difference (numerical gradient)</td><td class="math-cell">\(\displaystyle f'(x) \approx \frac{f(x+h) - f(x-h)}{2h}\)</td></tr>
+          <tr><td>Notation</td><td class="math-cell">\(f'(x) \;=\; \dfrac{df}{dx} \;=\; \dfrac{d}{dx} f(x)\)</td></tr>
+        </table>
+      </div>
+      <p>The derivative is the slope of \(f\) at \(x\): how much \(f\) changes per unit change in \(x\). The central difference is what a gradient check uses, and its error shrinks like \(h^2\) rather than \(h\).</p>
+
+      <h3 id="common-derivatives">Common derivatives</h3>
+      <div class="table-wrap">
+        <table class="formulas">
+          <tr><th>\(f(x)\)</th><th>\(f'(x)\)</th></tr>
+          <tr><td class="math-cell">\(c\) (constant)</td><td class="math-cell">\(0\)</td></tr>
+          <tr><td class="math-cell">\(x\)</td><td class="math-cell">\(1\)</td></tr>
+          <tr><td class="math-cell">\(x^n\)</td><td class="math-cell">\(n x^{n-1}\)</td></tr>
+          <tr><td class="math-cell">\(\dfrac{1}{x}\)</td><td class="math-cell">\(-\dfrac{1}{x^2}\)</td></tr>
+          <tr><td class="math-cell">\(\sqrt{x}\)</td><td class="math-cell">\(\dfrac{1}{2\sqrt{x}}\)</td></tr>
+          <tr><td class="math-cell">\(e^x\)</td><td class="math-cell">\(e^x\)</td></tr>
+          <tr><td class="math-cell">\(a^x\)</td><td class="math-cell">\(a^x \ln a\)</td></tr>
+          <tr><td class="math-cell">\(\ln x\)</td><td class="math-cell">\(\dfrac{1}{x}\)</td></tr>
+          <tr><td class="math-cell">\(\log_b x\)</td><td class="math-cell">\(\dfrac{1}{x \ln b}\)</td></tr>
+          <tr><td class="math-cell">\(\sin x\)</td><td class="math-cell">\(\cos x\)</td></tr>
+          <tr><td class="math-cell">\(\cos x\)</td><td class="math-cell">\(-\sin x\)</td></tr>
+          <tr><td class="math-cell">\(\tan x\)</td><td class="math-cell">\(\sec^2 x = 1 + \tan^2 x\)</td></tr>
+          <tr><td class="math-cell">\(|x|\)</td><td class="math-cell">\(\operatorname{sign}(x)\) &nbsp;(undefined at 0)</td></tr>
+          <tr><td class="math-cell">\(\tanh x\)</td><td class="math-cell">\(1 - \tanh^2 x\)</td></tr>
+          <tr><td class="math-cell">\(\sigma(x) = \dfrac{1}{1 + e^{-x}}\) (sigmoid)</td><td class="math-cell">\(\sigma(x)\,\bigl(1 - \sigma(x)\bigr)\)</td></tr>
+          <tr><td class="math-cell">\(\operatorname{ReLU}(x) = \max(0, x)\)</td><td class="math-cell">\(1\) if \(x \gt 0\), else \(0\) &nbsp;(frameworks use 0 at \(x = 0\))</td></tr>
+          <tr><td class="math-cell">\(\operatorname{softplus}(x) = \ln(1 + e^x)\)</td><td class="math-cell">\(\sigma(x)\)</td></tr>
+          <tr><td class="math-cell">\(\operatorname{GELU}(x) = x\,\Phi(x)\)</td><td class="math-cell">\(\Phi(x) + x\,\phi(x)\)</td></tr>
+        </table>
+      </div>
+      <p>For GELU, \(\Phi\) is the standard normal CDF and \(\phi(x) = \frac{1}{\sqrt{2\pi}} e^{-x^2/2}\) is its PDF. \(\tanh\) and \(\sigma\) have derivatives written in terms of their own output, which is why backprop caches the output for them.</p>
+
+      <h3 id="derivative-rules">Derivative rules</h3>
+      <div class="table-wrap">
+        <table class="formulas">
+          <tr><th>Rule</th><th>Formula</th></tr>
+          <tr><td>Constant multiple</td><td class="math-cell">\(\bigl(c\,f\bigr)' = c\,f'\)</td></tr>
+          <tr><td>Sum</td><td class="math-cell">\((f + g)' = f' + g'\)</td></tr>
+          <tr><td>Product</td><td class="math-cell">\((fg)' = f'g + fg'\)</td></tr>
+          <tr><td>Quotient</td><td class="math-cell">\(\left(\dfrac{f}{g}\right)' = \dfrac{f'g - fg'}{g^2}\)</td></tr>
+          <tr><td>Power</td><td class="math-cell">\(\dfrac{d}{dx} x^n = n x^{n-1}\)</td></tr>
+          <tr><td>Chain</td><td class="math-cell">\(\dfrac{d}{dx} f\bigl(g(x)\bigr) = f'\bigl(g(x)\bigr)\, g'(x)\)</td></tr>
+        </table>
+      </div>
+
+      <h3 id="power-rule">Power rule</h3>
+      \[ \frac{d}{dx}\, x^n = n\,x^{n-1} \qquad \text{for any real } n \]
+      <p>Bring the power down in front, then subtract 1 from the power. Rewrite roots and fractions as powers first, so the rule applies:</p>
+      \[ \sqrt{x} = x^{1/2} \qquad \frac{1}{x^n} = x^{-n} \qquad \frac{1}{\sqrt{x}} = x^{-1/2} \]
+
+      <div class="example">
+        <span class="label">Examples</span>
+        \[
+        \begin{aligned}
+        \frac{d}{dx}\left(3x^4 - 2x + 7\right) &= 12x^3 - 2 \\[4pt]
+        \frac{d}{dx}\,\frac{1}{x^3} = \frac{d}{dx}\,x^{-3} &= -3x^{-4} = -\frac{3}{x^4} \\[4pt]
+        \frac{d}{dx}\,\sqrt{x} = \frac{d}{dx}\,x^{1/2} &= \tfrac{1}{2}x^{-1/2} = \frac{1}{2\sqrt{x}} \\[4pt]
+        \frac{d}{dv}\,(v + \epsilon)^{-1/2} &= -\tfrac{1}{2}(v + \epsilon)^{-3/2}
+        \end{aligned}
+        \]
+        <p>The last one (strictly also a chain rule, but the inner derivative is 1) is the variance term in layernorm's backward pass.</p>
+      </div>
+
+      <h3 id="chain-rule">Chain rule</h3>
+      \[ \frac{d}{dx}\, f\bigl(g(x)\bigr) = f'\bigl(g(x)\bigr) \cdot g'(x) \]
+      <p>In Leibniz notation, with \(y = f(u)\) and \(u = g(x)\):</p>
+      \[ \frac{dy}{dx} = \frac{dy}{du} \cdot \frac{du}{dx} \]
+      <p><strong>How to apply it:</strong> name the inner expression \(u\). Differentiate the outer function with respect to \(u\), as if \(u\) were the variable, then multiply by \(du/dx\). For deeper nesting, repeat working inwards: one factor per layer.</p>
+
+      <div class="example">
+        <span class="label">Examples</span>
+        <p>\(e^{3x^2}\), with \(u = 3x^2\):</p>
+        \[ \frac{d}{dx}\, e^{3x^2} = e^{u} \cdot \frac{du}{dx} = e^{3x^2} \cdot 6x \]
+        <p>\(\ln(1 + e^x)\), with \(u = 1 + e^x\):</p>
+        \[ \frac{d}{dx} \ln(1 + e^x) = \frac{1}{u} \cdot e^x = \frac{e^x}{1 + e^x} = \sigma(x) \]
+        <p>A neuron, \(\tanh(wx + b)\), differentiated with respect to \(w\), with \(u = wx + b\):</p>
+        \[ \frac{d}{dw} \tanh(wx + b) = \bigl(1 - \tanh^2 u\bigr) \cdot x \]
+        <p>Three layers deep, \(\sin\bigl(\ln(x^2)\bigr)\):</p>
+        \[ \frac{d}{dx} \sin\bigl(\ln(x^2)\bigr) = \cos\bigl(\ln(x^2)\bigr) \cdot \frac{1}{x^2} \cdot 2x = \frac{2\cos\bigl(\ln(x^2)\bigr)}{x} \]
+      </div>
+
+      <h3 id="partial-derivatives">Partial derivatives</h3>
+      <p>\(\dfrac{\partial f}{\partial x}\) is the derivative of \(f\) with respect to \(x\), treating every other variable as a constant.</p>
+      <p>The <strong>gradient</strong> collects all the partial derivatives. It has the same shape as the input:</p>
+      \[ \nabla f = \left( \frac{\partial f}{\partial x_1}, \frac{\partial f}{\partial x_2}, \dots, \frac{\partial f}{\partial x_n} \right) \]
+
+      <div class="example">
+        <span class="label">Example: two variables</span>
+        \[ f(x, y) = x^2 y + 3y + \sin x \]
+        \[ \frac{\partial f}{\partial x} = 2xy + \cos x \qquad\qquad \frac{\partial f}{\partial y} = x^2 + 3 \]
+        <p>For \(\partial f/\partial x\), \(y\) acts like a number, so \(x^2 y\) behaves like \(5x^2\) and \(3y\) is a constant (derivative 0).</p>
+      </div>
+
+      <div class="example">
+        <span class="label">Example: squared error</span>
+        \[ L(w, b) = (wx + b - y)^2 \]
+        \[ \frac{\partial L}{\partial w} = 2(wx + b - y) \cdot x \qquad\qquad \frac{\partial L}{\partial b} = 2(wx + b - y) \]
+        <p>Chain rule on the outside, then the partial of the inside: \(\partial(wx + b - y)/\partial w = x\) and \(\partial(wx + b - y)/\partial b = 1\).</p>
+      </div>
+
+      <div class="example">
+        <span class="label">Example: a sum, differentiated by one element</span>
+        \[ f(w) = \sum_i w_i x_i \qquad\Longrightarrow\qquad \frac{\partial f}{\partial w_k} = x_k \]
+        <p>Only the \(i = k\) term contains \(w_k\); every other term is a constant and drops out. Written with the Kronecker delta, \(\partial w_i / \partial w_k = \delta_{ik}\), which is 1 when \(i = k\) and 0 otherwise, so \(\sum_i \delta_{ik} x_i = x_k\).</p>
+      </div>
+
+      <h3 id="multivariable-chain-rule">Multivariable chain rule</h3>
+      <p>If \(z = f(x, y)\) and both \(x\) and \(y\) depend on \(t\):</p>
+      \[ \frac{dz}{dt} = \frac{\partial z}{\partial x} \frac{dx}{dt} + \frac{\partial z}{\partial y} \frac{dy}{dt} \]
+      <p>In general, if \(L\) depends on \(x_i\) through intermediate values \(y_1, \dots, y_m\):</p>
+      \[ \frac{\partial L}{\partial x_i} = \sum_{j=1}^{m} \frac{\partial L}{\partial y_j} \, \frac{\partial y_j}{\partial x_i} \]
+      <p><strong>How to apply it:</strong> find every path from \(x\) to \(L\). Each path gives one product of derivatives along it (the ordinary chain rule); add the paths together. This is why gradients accumulate with <code>+=</code> when a value is used more than once.</p>
+
+      <div class="note">
+        <p>“Multivariable chain rule” is the usual name. “Multivariate” means the same thing but is mostly used in statistics.</p>
+      </div>
+
+      <div class="example">
+        <span class="label">Example: two paths</span>
+        <p>\(z = xy\), with \(x = t^2\) and \(y = \sin t\):</p>
+        \[ \frac{dz}{dt} = \underbrace{y \cdot 2t}_{\text{via } x} + \underbrace{x \cdot \cos t}_{\text{via } y} = 2t \sin t + t^2 \cos t \]
+        <p>That matches the product rule on \(t^2 \sin t\).</p>
+      </div>
+
+      <div class="example">
+        <span class="label">Example: a value used twice</span>
+        \[ L = ab + a \qquad\Longrightarrow\qquad \frac{\partial L}{\partial a} = b + 1 \]
+        <p>\(a\) reaches \(L\) through the product and directly, so the two contributions add.</p>
+      </div>
+
+      <div class="example">
+        <span class="label">Example: a linear layer, \(Y = XW\)</span>
+        <p>Element-wise, \(Y_{nj} = \sum_k X_{nk} W_{kj}\). Each \(W_{kj}\) reaches \(L\) through every row \(n\) of \(Y\), so sum over \(n\):</p>
+        \[ \frac{\partial L}{\partial W_{kj}} = \sum_n \frac{\partial L}{\partial Y_{nj}} \frac{\partial Y_{nj}}{\partial W_{kj}} = \sum_n \frac{\partial L}{\partial Y_{nj}} X_{nk} \]
+        \[ \Longrightarrow\quad \frac{\partial L}{\partial W} = X^{\top} \frac{\partial L}{\partial Y} \]
+        <p>Each \(X_{nk}\) reaches \(L\) through every column \(j\) of row \(n\):</p>
+        \[ \frac{\partial L}{\partial X_{nk}} = \sum_j \frac{\partial L}{\partial Y_{nj}} W_{kj} \]
+        \[ \Longrightarrow\quad \frac{\partial L}{\partial X} = \frac{\partial L}{\partial Y} W^{\top} \]
+        <p>In code: <code>dW = x.T @ dout</code> and <code>dx = dout @ W.T</code>.</p>
+      </div>
+    </main>
+  </div>
+</body>
+</html>
