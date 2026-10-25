@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Residual stream · ML Cheat Sheet</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js" onload="renderMathInElement(document.body)"></script>
+</head>
+<body>
+  <header class="site-header">
+    <nav>
+      <a class="home" href="index.html">ML Cheat Sheet</a>
+      <a href="math.html">Math</a>
+      <a href="gradient-descent.html">Gradient descent</a>
+      <a href="layers.html">Layers</a>
+      <a href="layernorm.html">LayerNorm</a>
+      <a href="residual-stream.html" aria-current="page">Residual stream</a>
+      <a href="attention.html">Attention</a>
+      <a href="positions.html">Positions</a>
+    </nav>
+  </header>
+
+  <div class="page with-toc">
+    <nav class="toc" aria-label="On this page">
+      <h2>On this page</h2>
+      <ol>
+        <li><a href="#residual">Residual connections</a></li>
+        <li><a href="#gradients">Why they make depth trainable</a></li>
+        <li><a href="#stream">The residual stream</a></li>
+        <li><a href="#block">The transformer block</a>
+          <ol>
+            <li><a href="#pre-post">Pre-norm vs post-norm</a></li>
+          </ol>
+        </li>
+        <li><a href="#whole-model">The whole model</a></li>
+        <li><a href="#scale">Keeping the scale in check</a></li>
+        <li><a href="#reading">Reading the stream</a></li>
+      </ol>
+    </nav>
+
+    <main>
+      <h1>Residual stream</h1>
+      <p class="lede">The idea that holds a transformer together: one vector per token, which every layer reads from and adds to.</p>
+
+      <!-- ============================================================ -->
+      <h2 id="residual">Residual connections</h2>
+      <p>A plain network replaces its input at every layer. A residual connection <strong>adds</strong> the layer's output to its input instead:</p>
+      <div class="result">
+        \[ \text{plain: } x_{l+1} = f_l(x_l) \qquad\qquad \text{residual: } x_{l+1} = x_l + f_l(x_l) \]
+      </div>
+      <p>The layer only has to learn a <em>change</em> to its input (the “residual”), not the whole output. If a layer has nothing useful to add, it can output roughly zero and the input passes through untouched. From ResNet (He et al., 2015), which used it to train 152-layer image networks.</p>
+
+      <!-- ============================================================ -->
+      <h2 id="gradients">Why they make depth trainable</h2>
+      <p>Differentiate one residual layer, \(x_{l+1} = x_l + f(x_l)\):</p>
+      \[ \frac{\partial x_{l+1}}{\partial x_l} = I + \frac{\partial f}{\partial x_l} \qquad\Longrightarrow\qquad \frac{\partial L}{\partial x_l} = \frac{\partial L}{\partial x_{l+1}} + \frac{\partial L}{\partial x_{l+1}} \frac{\partial f}{\partial x_l} \]
+      <p>The first term is the gradient from above, copied through <strong>unchanged</strong>. That's the “a value used twice: add the gradients” rule: \(x_l\) is used by \(f\) and by the addition.</p>
+      <p>Going back through many layers, a plain network <em>multiplies</em> one Jacobian per layer, so the gradient shrinks or blows up exponentially with depth. With residuals, there's always a direct path from the loss to every layer with no multiplications at all: expand the product and one of its terms is just \(\partial L / \partial x_L\):</p>
+      \[ \frac{\partial L}{\partial x_0} = \frac{\partial L}{\partial x_L} \prod_{l=0}^{L-1} \left( I + \frac{\partial f_l}{\partial x_l} \right) = \frac{\partial L}{\partial x_L} \Bigl( I + \text{(terms through one or more layers)} \Bigr) \]
+      <p>(For row vectors, the factors multiply in order from the top layer down.)</p>
+
+      <!-- ============================================================ -->
+      <h2 id="stream">The residual stream</h2>
+      <p>In a transformer, the running vector \(x\) for each token is called the <strong>residual stream</strong>. It starts as the token's embedding and runs through the whole model. No layer replaces it: each one <strong>reads</strong> from it (through a LayerNorm and its own input projection) and <strong>writes</strong> to it (by adding its output projection's result).</p>
+
+      <figure class="diagram">
+        <svg viewBox="0 0 560 410" style="max-width: 36rem; margin: 0 auto" role="img" aria-label="The residual stream runs vertically from the embeddings to the final LayerNorm and unembedding. In each block, attention and then the MLP branch off the stream, through a LayerNorm, and add their output back at a plus node. Gradients flow straight back up the stream.">
+          <defs>
+            <marker id="rs-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto"><path d="M0,0 L10,5 L0,10 z" style="fill: var(--accent)"/></marker>
+            <marker id="rs-grad" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto"><path d="M0,0 L10,5 L0,10 z" style="fill: var(--grad)"/></marker>
+          </defs>
+
+          <rect class="box" x="100" y="12" width="200" height="34" rx="6"/><text x="200" y="34" text-anchor="middle">Embeddings</text>
+
+          <!-- the stream itself -->
+          <line class="fwd-line" style="stroke-width: 4" x1="200" y1="46" x2="200" y2="128"/>
+          <line class="fwd-line" style="stroke-width: 4" x1="200" y1="152" x2="200" y2="230"/>
+          <line class="fwd-line" style="stroke-width: 4" x1="200" y1="254" x2="200" y2="328" marker-end="url(#rs-arrow)"/>
+
+          <!-- attention branch -->
+          <path class="fwd-line" d="M200,66 H380 V82" marker-end="url(#rs-arrow)"/>
+          <rect class="box" x="280" y="84" width="200" height="36" rx="6"/><text x="380" y="107" text-anchor="middle">LayerNorm → Attention</text>
+          <path class="fwd-line" d="M380,120 V140 H216" marker-end="url(#rs-arrow)"/>
+          <circle class="box" cx="200" cy="140" r="12"/><text x="200" y="145" text-anchor="middle">+</text>
+
+          <!-- MLP branch -->
+          <path class="fwd-line" d="M200,168 H380 V184" marker-end="url(#rs-arrow)"/>
+          <rect class="box" x="280" y="186" width="200" height="36" rx="6"/><text x="380" y="209" text-anchor="middle">LayerNorm → MLP</text>
+          <path class="fwd-line" d="M380,222 V242 H216" marker-end="url(#rs-arrow)"/>
+          <circle class="box" cx="200" cy="242" r="12"/><text x="200" y="247" text-anchor="middle">+</text>
+
+          <!-- block bracket -->
+          <path style="stroke: var(--muted); fill: none; stroke-width: 1.5" d="M160,58 H150 V262 H160"/>
+          <text class="muted" x="142" y="156" text-anchor="end">block</text>
+          <text class="muted" x="142" y="172" text-anchor="end">× N</text>
+
+          <!-- gradient path -->
+          <line class="grad-line" x1="226" y1="326" x2="226" y2="52" marker-end="url(#rs-grad)"/>
+          <text class="grad" x="234" y="300">gradients flow</text>
+          <text class="grad" x="234" y="316">straight back up</text>
+          <text class="muted" x="234" y="282">residual stream</text>
+
+          <rect class="box" x="100" y="330" width="200" height="34" rx="6"/><text x="200" y="352" text-anchor="middle">LayerNorm → unembed</text>
+          <line class="fwd-line" x1="200" y1="364" x2="200" y2="388" marker-end="url(#rs-arrow)"/>
+          <text x="200" y="404" text-anchor="middle">logits</text>
+        </svg>
+        <figcaption>Each block branches off the stream twice and adds back twice. The stream itself only ever has things added to it.</figcaption>
+      </figure>
+
+      <p>Since every layer adds, the final stream is a sum:</p>
+      \[ x_{\text{final}} = x_0 + \sum_{\text{every attention and MLP layer}} \text{(that layer's output)} \]
+      <p>So the stream works like a shared memory or communication channel of width \(C\): early layers write information into it, later layers read it back out. Different layers tend to use different directions (subspaces) of it, so they don't overwrite each other.</p>
+      <div class="table-wrap">
+        <table class="formulas">
+          <tr><th>Sublayer</th><th>Job</th></tr>
+          <tr><td><a href="attention.html">Attention</a></td><td>Moves information <strong>between</strong> positions: reads from other tokens' streams and writes into this one.</td></tr>
+          <tr><td>MLP</td><td>Processes each position <strong>on its own</strong>: widen to \(4C\), non-linearity (GELU), narrow back to \(C\). Much of the model's stored knowledge is thought to live here.</td></tr>
+        </table>
+      </div>
+
+      <!-- ============================================================ -->
+      <h2 id="block">The transformer block</h2>
+      <div class="result">
+        \[
+        \begin{aligned}
+        x &\leftarrow x + \operatorname{Attention}\bigl(\operatorname{LN}_1(x)\bigr) \\
+        x &\leftarrow x + \operatorname{MLP}\bigl(\operatorname{LN}_2(x)\bigr)
+        \end{aligned}
+        \qquad\qquad
+        \operatorname{MLP}(h) = \operatorname{GELU}(h W_1 + b_1)\, W_2 + b_2
+        \]
+      </div>
+      <p>\(W_1\) is \(C \times 4C\) and \(W_2\) is \(4C \times C\). Every block has the same shape; a model is \(N\) of them stacked, each with its own weights.</p>
+
+      <h3 id="pre-post">Pre-norm vs post-norm</h3>
+      <div class="table-wrap">
+        <table class="formulas">
+          <tr><th></th><th>Formula</th><th>Notes</th></tr>
+          <tr><td>Post-norm (2017 original)</td><td class="math-cell">\(x \leftarrow \operatorname{LN}\bigl(x + f(x)\bigr)\)</td><td>The norm sits <em>on</em> the stream, so every gradient passes through every LayerNorm. Deep stacks needed careful learning-rate warmup to train at all.</td></tr>
+          <tr><td>Pre-norm (GPT-2 onwards)</td><td class="math-cell">\(x \leftarrow x + f\bigl(\operatorname{LN}(x)\bigr)\)</td><td>The norm is only on the branch. The stream is never normalised, so the identity path from the loss to every layer stays clean.</td></tr>
+        </table>
+      </div>
+      <p>Because a pre-norm stream is never normalised, it grows as layers add to it. That's why pre-norm models need a <strong>final LayerNorm</strong> before the output layer.</p>
+
+      <!-- ============================================================ -->
+      <h2 id="whole-model">The whole model</h2>
+      \[
+      \begin{aligned}
+      x_0 &= \text{tok\_emb}[\text{tokens}] + \text{pos\_emb}[0..T{-}1] && (B, T, C) \\
+      x &\leftarrow \operatorname{Block}_l(x), \quad l = 1, \dots, N && (B, T, C) \\
+      \text{logits} &= \operatorname{LN}_f(x)\; W_U && (B, T, V)
+      \end{aligned}
+      \]
+      <p>\(W_U\) (the “unembedding”, or <code>lm_head</code>) maps the stream back to a score per vocabulary token. GPT-2 ties it to the token embedding, \(W_U = W_E^\top\), since reading a token into the stream and scoring the stream against tokens are closely related jobs. With RoPE, there's no <code>pos_emb</code>: position goes into attention instead (see <a href="positions.html">Positions</a>).</p>
+
+      <!-- ============================================================ -->
+      <h2 id="scale">Keeping the scale in check</h2>
+      <p>Every sublayer adds to the stream, and there are \(2N\) of them. If each adds something of similar size and roughly independent, the stream's variance grows like the number of additions. GPT-2 counters this at initialisation by scaling down the weights of each sublayer's <em>output</em> projection (attention's \(W_O\), the MLP's \(W_2\)):</p>
+      \[ \text{std} = \frac{0.02}{\sqrt{2N}} \qquad (\text{instead of } 0.02) \]
+      <p>That also means each block starts close to the identity (\(f(x) \approx 0\)), so a freshly initialised deep model behaves like a shallow one and training can grow it from there.</p>
+
+      <!-- ============================================================ -->
+      <h2 id="reading">Reading the stream</h2>
+      <p>Because the stream is a sum and the output is (after the final LayerNorm) a linear map of it, you can look inside a model by treating partial sums as if they were the final stream:</p>
+      <ul>
+        <li><strong>Logit lens:</strong> apply \(\operatorname{LN}_f\) and \(W_U\) to the stream after layer \(l\) to see what the model would predict if it stopped there. Predictions typically sharpen layer by layer.</li>
+        <li><strong>Direct logit attribution:</strong> push one layer's output through \(W_U\) on its own to see which tokens that layer pushes up or down.</li>
+        <li><strong>Features as directions:</strong> concepts tend to be represented as directions in the stream, which layers write and later layers read. Linear probes and sparse autoencoders look for them.</li>
+      </ul>
+      <p>These are approximations (the final LayerNorm isn't quite linear), but they work well enough to be the starting point for most interpretability work.</p>
+    </main>
+  </div>
+</body>
+</html>

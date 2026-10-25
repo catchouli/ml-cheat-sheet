@@ -21,6 +21,8 @@ It goes from plain maths, to how neural networks learn, to transformers:
 
 **LayerNorm** gets its own page, because its backward pass took me about ten pages of notebook to derive. Here it's five steps.
 
+**Residual stream** is the big picture of a transformer: residual connections and why they make depth trainable, the stream every layer reads from and adds to, the block, and pre-norm vs post-norm.
+
 **Attention** covers queries, keys and values, the causal mask, multi-head attention and the backward pass.
 
 **Position encoding** goes from the sine waves in the original transformer paper, through learned embeddings and relative biases, to RoPE.
