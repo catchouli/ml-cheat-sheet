@@ -33,6 +33,8 @@ It goes from plain maths, to how neural networks learn, to transformers:
 
 It's plain HTML and CSS, with formulas written in LaTeX and rendered in the browser by [KaTeX](https://katex.org/). Pushing to `main` deploys it to GitHub Pages.
 
-Search runs in the browser too. `build_search.py` reads every page and writes `search-index.js`, which has the text of each section and the headings it sits under, and the search box looks through that in memory and links straight to the heading. Press `/` to jump to it. The deploy rebuilds the index, so it's only worth running yourself to try search locally.
+Search runs in the browser too. `build.py` reads every page and writes `search-index.js`, which has the text of each section and the headings it sits under, and the search box looks through that in memory and links straight to the heading. Press `/` to jump to it.
+
+`build.py` also writes the menu at the top of every page from one list, so adding a page means adding it there and running `python3 build.py`. The deploy runs it as well, so the live site is never out of date.
 
 To read it locally, open `index.html`, or serve the folder with `python3 -m http.server`.

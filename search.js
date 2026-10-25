@@ -1,5 +1,5 @@
 // Site search: a box in the header that searches every section in memory.
-// The index, search-index.js, is built by build_search.py and loaded the first time the box is used.
+// The index, search-index.js, is built by build.py and loaded the first time the box is used.
 (function () {
   const nav = document.querySelector(".site-header nav");
   if (!nav) return;
@@ -27,7 +27,7 @@
       index = window.SEARCH_INDEX.map(prepare);
       update();
     };
-    script.onerror = () => message("The search index is missing: run build_search.py");
+    script.onerror = () => message("The search index is missing: run build.py");
     document.head.append(script);
   }
 

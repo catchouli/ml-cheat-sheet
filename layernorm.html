@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>LayerNorm · ML Cheat Sheet</title>
   <link rel="stylesheet" href="style.css">
+  <script defer src="menu.js"></script>
   <script defer src="search.js"></script>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
   <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
@@ -14,14 +15,29 @@
   <header class="site-header">
     <nav>
       <a class="home" href="index.html">ML Cheat Sheet</a>
-      <a href="math.html">Math</a>
-      <a href="gradient-descent.html">Gradient descent</a>
-      <a href="layers.html">Layers</a>
-      <a href="layernorm.html" aria-current="page">LayerNorm</a>
-      <a href="residual-stream.html">Residual stream</a>
-      <a href="attention.html">Attention</a>
-      <a href="positions.html">Positions</a>
-      <a href="gpt.html">GPT model</a>
+      <details class="menu">
+        <summary>Maths</summary>
+        <ul>
+          <li><a href="math.html">Math</a></li>
+        </ul>
+      </details>
+      <details class="menu current">
+        <summary>Neural networks</summary>
+        <ul>
+          <li><a href="gradient-descent.html">Gradient descent</a></li>
+          <li><a href="layers.html">Layers</a></li>
+          <li><a href="layernorm.html" aria-current="page">LayerNorm</a></li>
+        </ul>
+      </details>
+      <details class="menu">
+        <summary>Transformers</summary>
+        <ul>
+          <li><a href="residual-stream.html">Residual stream</a></li>
+          <li><a href="attention.html">Attention</a></li>
+          <li><a href="positions.html">Positions</a></li>
+          <li><a href="gpt.html">GPT model</a></li>
+        </ul>
+      </details>
     </nav>
   </header>
 

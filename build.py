@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
-"""Builds search-index.js: one entry per section (every h2/h3/h4 with an id) of every page.
+"""Builds the parts of the site that would otherwise need editing on every page:
 
-Run it after editing a page. The Pages deploy runs it too, so the live site is never stale.
+- the header menu on every page, from NAV below;
+- search-index.js: one entry per section (every h2/h3/h4 with an id) of every page.
+
+Run it after adding or editing a page. The Pages deploy runs it too, so the live site is never stale.
 """
 
 import json
@@ -13,6 +16,24 @@ from pathlib import Path
 from typing import final, override
 
 ROOT = Path(__file__).parent
+
+# The header menu: (section, [(page, title)]). Same groups as the home page.
+NAV: list[tuple[str, list[tuple[str, str]]]] = [
+    ("Maths", [
+        ("math.html", "Math"),
+    ]),
+    ("Neural networks", [
+        ("gradient-descent.html", "Gradient descent"),
+        ("layers.html", "Layers"),
+        ("layernorm.html", "LayerNorm"),
+    ]),
+    ("Transformers", [
+        ("residual-stream.html", "Residual stream"),
+        ("attention.html", "Attention"),
+        ("positions.html", "Positions"),
+        ("gpt.html", "GPT model"),
+    ]),
+]
 SKIP = {"script", "style", "svg", "th"}  # plus anything with class="label"
 BLOCK = {"p", "div", "li", "td", "th", "tr", "pre", "br", "table", "ol", "ul", "span"}
 # LaTeX commands that only lay things out, so aren't worth searching for.
@@ -127,16 +148,39 @@ def entries(file: Path) -> Iterator[dict[str, object]]:
         }
 
 
+def render_nav(current: str) -> str:
+    lines = ['<nav>', '      <a class="home" href="index.html">ML Cheat Sheet</a>']
+    for section, pages in NAV:
+        here = any(page == current for page, _ in pages)
+        lines.append(f'      <details class="menu{" current" if here else ""}">')
+        lines.append(f"        <summary>{section}</summary>")
+        lines.append("        <ul>")
+        for page, title in pages:
+            attr = ' aria-current="page"' if page == current else ""
+            lines.append(f'          <li><a href="{page}"{attr}>{title}</a></li>')
+        lines.append("        </ul>")
+        lines.append("      </details>")
+    lines.append("    </nav>")
+    return "\n".join(lines)
+
+
+def write_nav(file: Path) -> None:
+    html = file.read_text()
+    # The header's <nav> is the only one without attributes; the contents list is <nav class="toc">.
+    new, n = re.subn(r"<nav>.*?</nav>", lambda _: render_nav(file.name), html, count=1, flags=re.S)
+    assert n == 1, f"{file.name} has no header <nav>"
+    if new != html:
+        _ = file.write_text(new)
+
+
 def main() -> None:
-    # Pages in the order the header nav lists them.
-    nav = re.search(r"<nav>(.*?)</nav>", (ROOT / "index.html").read_text(), re.S)
-    assert nav, "index.html has no <nav>"
-    links: list[str] = re.findall(r'href="([^"#]+\.html)"', nav.group(1))
-    pages = [p for p in links if p != "index.html"]
+    pages = [page for _, section in NAV for page, _ in section]
+    for page in ["index.html", *pages]:
+        write_nav(ROOT / page)
     index = [e for p in pages for e in entries(ROOT / p)]
     out = ROOT / "search-index.js"
     _ = out.write_text("window.SEARCH_INDEX = " + json.dumps(index, ensure_ascii=False, indent=0) + ";\n")
-    print(f"{out.name}: {len(index)} sections from {len(pages)} pages")
+    print(f"{out.name}: {len(index)} sections from {len(pages)} pages, menu written to {len(pages) + 1} pages")
 
 
 if __name__ == "__main__":
