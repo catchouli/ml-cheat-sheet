@@ -7,13 +7,21 @@
 
 My own reference for the maths and ML I keep needing to look up: formulas, definitions and short worked examples, one page per topic.
 
-I'm working through building transformers from scratch, and to get through backprop I had to re-remember (or re-derive) a load of maths I hadn't touched in about 20 years. This is the tidy version of the pages in my notebook, so I don't have to derive the chain rule for sums again next time.
+I'm working through building transformers from scratch, and to get through backprop I had to re-remember (or re-derive) a load of maths I hadn't touched in a long time. This is the tidy version of the pages in my notebook, so I don't have to derive the chain rule for sums again next time.
 
 ## What's in it
 
+It goes from plain maths, to how neural networks learn, to transformers:
+
 **Math** has exponent and log rules, sums and products, a table of common derivatives, and the power rule, chain rule, partial derivatives and the multivariable chain rule, each with a few worked examples.
 
-**Backprop** and **Attention** are next, and empty for now.
+**Gradient descent** is the big picture: loss, gradients and the update rule, backprop as the multivariable chain rule, a two-layer network worked through forwards and backwards, and momentum, Adam and AdamW.
+
+**Layers** goes through linear, tanh, sigmoid, ReLU, GELU, softmax and the losses one at a time: what each does, what it's for, and its derivative with the derivation.
+
+**LayerNorm** gets its own page, because its backward pass took me about ten pages of notebook to derive. Here it's five steps.
+
+**Attention** covers queries, keys and values, the causal mask, multi-head attention and the backward pass.
 
 ## How it works
 

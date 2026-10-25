@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Gradient descent · ML Cheat Sheet</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js" onload="renderMathInElement(document.body)"></script>
+</head>
+<body>
+  <header class="site-header">
+    <nav>
+      <a class="home" href="index.html">ML Cheat Sheet</a>
+      <a href="math.html">Math</a>
+      <a href="gradient-descent.html" aria-current="page">Gradient descent</a>
+      <a href="layers.html">Layers</a>
+      <a href="layernorm.html">LayerNorm</a>
+      <a href="attention.html">Attention</a>
+    </nav>
+  </header>
+
+  <div class="page with-toc">
+    <nav class="toc" aria-label="On this page">
+      <h2>On this page</h2>
+      <ol>
+        <li><a href="#setup">The setup</a></li>
+        <li><a href="#gradient-descent">Gradient descent</a></li>
+        <li><a href="#backprop">Backprop</a>
+          <ol>
+            <li><a href="#one-layer">One layer's job</a></li>
+            <li><a href="#rules">Rules of thumb</a></li>
+          </ol>
+        </li>
+        <li><a href="#example">Worked example: a 2-layer net</a>
+          <ol>
+            <li><a href="#example-forward">Forward</a></li>
+            <li><a href="#example-backward">Backward</a></li>
+            <li><a href="#example-loop">Training loop</a></li>
+          </ol>
+        </li>
+        <li><a href="#optimizers">Beyond plain SGD</a></li>
+      </ol>
+    </nav>
+
+    <main>
+      <h1>Gradient descent</h1>
+      <p class="lede">How a network learns: measure how wrong it is, work out which way to nudge every parameter, nudge, repeat. The derivatives of individual layers are on the <a href="layers.html">Layers</a> page.</p>
+
+      <!-- ============================================================ -->
+      <h2 id="setup">The setup</h2>
+      <div class="table-wrap">
+        <table class="formulas">
+          <tr><th>Thing</th><th>What it is</th></tr>
+          <tr><td>Model</td><td>A function \(\hat{y} = f(x;\, \theta)\): input \(x\) in, prediction \(\hat{y}\) out.</td></tr>
+          <tr><td>Parameters \(\theta\)</td><td>Every learnable number in the model: all the weight matrices and biases, flattened into one long list.</td></tr>
+          <tr><td>Loss \(L(\theta)\)</td><td>One number saying how wrong the predictions are on some data. Lower is better.</td></tr>
+          <tr><td>Gradient \(\nabla_\theta L\)</td><td>\(\partial L / \partial \theta_i\) for every parameter. Same shape as \(\theta\).</td></tr>
+          <tr><td>Training</td><td>Find the \(\theta\) that makes \(L\) small.</td></tr>
+        </table>
+      </div>
+      <p>A network is a chain of <strong>layers</strong>, each a simple function, some with parameters of their own:</p>
+      \[ L = \text{loss}\Bigl(f_n\bigl(\cdots f_2\bigl(f_1(x;\, \theta_1);\, \theta_2\bigr)\cdots;\, \theta_n\bigr),\; y\Bigr) \]
+
+      <!-- ============================================================ -->
+      <h2 id="gradient-descent">Gradient descent</h2>
+      <p>The gradient points in the direction that increases \(L\) fastest, so step the other way:</p>
+      <div class="result">
+        \[ \theta \;\leftarrow\; \theta - \eta \, \nabla_\theta L \]
+      </div>
+      <p>\(\eta\) is the <strong>learning rate</strong>: how big a step to take. Too small and training crawls; too big and it overshoots and diverges.</p>
+      <p>Each parameter moves on its own, by its own partial derivative:</p>
+      \[ \theta_i \;\leftarrow\; \theta_i - \eta \, \frac{\partial L}{\partial \theta_i} \]
+      <p>If increasing \(\theta_i\) would increase the loss (\(\partial L/\partial\theta_i \gt 0\)), it gets decreased, and vice versa. The bigger the effect, the bigger the step.</p>
+
+      <div class="table-wrap">
+        <table class="formulas">
+          <tr><th>Term</th><th>Meaning</th></tr>
+          <tr><td>Batch / minibatch</td><td>The handful of examples (say 64) the loss is averaged over for one step. Its gradient is a noisy estimate of the gradient over all the data, and much cheaper.</td></tr>
+          <tr><td>SGD</td><td>Stochastic gradient descent: gradient descent using minibatch gradients.</td></tr>
+          <tr><td>Step</td><td>One forward pass, one backward pass, one update.</td></tr>
+          <tr><td>Epoch</td><td>Enough steps to have seen every training example once.</td></tr>
+        </table>
+      </div>
+
+      <div class="note">
+        <p><strong>Why not numerical gradients?</strong> A central difference needs two forward passes <em>per parameter</em>. With millions of parameters that's millions of passes per step. Backprop gets every \(\partial L/\partial\theta_i\) for roughly the cost of one extra forward pass. Numerical gradients are still the standard way to <em>check</em> a backward pass.</p>
+      </div>
+
+      <!-- ============================================================ -->
+      <h2 id="backprop">Backprop</h2>
+      <p>Backpropagation is the <a href="math.html#multivariable-chain-rule">multivariable chain rule</a>, applied to the network one layer at a time, starting from the loss and working backwards.</p>
+      <ol>
+        <li><strong>Forward pass:</strong> run the layers in order. Each one saves (caches) whatever its backward pass will need.</li>
+        <li><strong>Start the backward pass</strong> with \(\dfrac{\partial L}{\partial L} = 1\).</li>
+        <li><strong>Backward pass:</strong> run the layers in reverse. Each takes the gradient of the loss with respect to its output, and returns the gradient with respect to each of its inputs and parameters.</li>
+        <li><strong>Update</strong> every parameter with its gradient.</li>
+      </ol>
+
+      <h3 id="one-layer">One layer's job</h3>
+      <p>A layer \(y = f(x;\, w)\) receives the <strong>upstream gradient</strong> \(\partial L/\partial y\) (called <code>dout</code> in code). It never needs to know what came after it; the chain rule does the rest:</p>
+      \[ \underbrace{\frac{\partial L}{\partial x}}_{\text{passed back}} = \underbrace{\frac{\partial L}{\partial y}}_{\text{upstream}} \cdot \underbrace{\frac{\partial y}{\partial x}}_{\text{local}} \qquad\qquad \underbrace{\frac{\partial L}{\partial w}}_{\text{for the update}} = \frac{\partial L}{\partial y} \cdot \frac{\partial y}{\partial w} \]
+      <p>With vectors and matrices, “\(\cdot\)” is a sum over every element of \(y\) that the input affects. Written element-wise:</p>
+      \[ \frac{\partial L}{\partial x_i} = \sum_j \frac{\partial L}{\partial y_j} \, \frac{\partial y_j}{\partial x_i} \]
+
+      <h3 id="rules">Rules of thumb</h3>
+      <div class="table-wrap">
+        <table class="formulas">
+          <tr><th>Rule</th><th>Why</th></tr>
+          <tr><td>A gradient has the same shape as the thing it's the gradient of.</td><td>One partial derivative per element. Shapes usually leave only one way to multiply things.</td></tr>
+          <tr><td>A value used in several places: <strong>add</strong> the gradients.</td><td>One chain-rule term per path. In code, <code>grad += ...</code>.</td></tr>
+          <tr><td>Broadcast going forward: <strong>sum</strong> going back.</td><td>A bias added to every row is used once per row, so its gradient sums over the rows.</td></tr>
+          <tr><td>Element-wise function \(y = f(x)\): \(\dfrac{\partial L}{\partial x} = \dfrac{\partial L}{\partial y} \odot f'(x)\).</td><td>Each \(y_i\) depends only on \(x_i\), so the sum collapses to one term.</td></tr>
+          <tr><td>Matrix product \(Y = XW\): \(\;\partial X = \partial Y\, W^\top,\; \partial W = X^\top \partial Y\).</td><td>Derived on the <a href="math.html#multivariable-chain-rule">Math page</a>.</td></tr>
+        </table>
+      </div>
+
+      <!-- ============================================================ -->
+      <h2 id="example">Worked example: a 2-layer net</h2>
+      <p>A classifier: \(N\) inputs of size \(D\), a hidden layer of size \(H\) with tanh, and \(C\) output classes.</p>
+
+      <figure class="diagram">
+        <svg viewBox="0 0 760 250" role="img" aria-label="Forward pass left to right through Linear, tanh, Linear and softmax cross-entropy; gradients flow right to left underneath, branching off to the weights">
+          <defs>
+            <marker id="arrow-fwd" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" style="fill: var(--accent)"/></marker>
+            <marker id="arrow-grad" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" style="fill: var(--grad)"/></marker>
+          </defs>
+
+          <!-- nodes -->
+          <text x="22" y="76" text-anchor="middle">x</text>
+          <rect class="box" x="50" y="50" width="120" height="44" rx="6"/><text x="110" y="77" text-anchor="middle">Linear</text>
+          <rect class="box" x="230" y="50" width="90" height="44" rx="6"/><text x="275" y="77" text-anchor="middle">tanh</text>
+          <rect class="box" x="380" y="50" width="120" height="44" rx="6"/><text x="440" y="77" text-anchor="middle">Linear</text>
+          <rect class="box" x="560" y="50" width="140" height="44" rx="6"/><text x="630" y="77" text-anchor="middle">softmax + CE</text>
+          <text x="740" y="77" text-anchor="middle">L</text>
+
+          <!-- forward arrows (top) -->
+          <line class="fwd-line" x1="32" y1="72" x2="48" y2="72" marker-end="url(#arrow-fwd)"/>
+          <line class="fwd-line" x1="170" y1="62" x2="228" y2="62" marker-end="url(#arrow-fwd)"/><text class="fwd" x="199" y="52" text-anchor="middle">a</text>
+          <line class="fwd-line" x1="320" y1="62" x2="378" y2="62" marker-end="url(#arrow-fwd)"/><text class="fwd" x="349" y="52" text-anchor="middle">h</text>
+          <line class="fwd-line" x1="500" y1="62" x2="558" y2="62" marker-end="url(#arrow-fwd)"/><text class="fwd" x="529" y="52" text-anchor="middle">z</text>
+          <line class="fwd-line" x1="700" y1="72" x2="728" y2="72" marker-end="url(#arrow-fwd)"/>
+
+          <!-- backward arrows (below) -->
+          <line class="grad-line" x1="228" y1="84" x2="172" y2="84" marker-end="url(#arrow-grad)"/><text class="grad" x="199" y="118" text-anchor="middle">∂L/∂a</text>
+          <line class="grad-line" x1="378" y1="84" x2="322" y2="84" marker-end="url(#arrow-grad)"/><text class="grad" x="349" y="118" text-anchor="middle">∂L/∂h</text>
+          <line class="grad-line" x1="558" y1="84" x2="502" y2="84" marker-end="url(#arrow-grad)"/><text class="grad" x="529" y="118" text-anchor="middle">∂L/∂z</text>
+          <text class="grad" x="740" y="118" text-anchor="middle">1</text>
+
+          <!-- parameters -->
+          <rect class="param" x="65" y="170" width="90" height="34" rx="6"/><text x="110" y="192" text-anchor="middle">W₁, b₁</text>
+          <rect class="param" x="395" y="170" width="90" height="34" rx="6"/><text x="440" y="192" text-anchor="middle">W₂, b₂</text>
+          <line class="fwd-line" x1="95" y1="168" x2="95" y2="96" marker-end="url(#arrow-fwd)"/>
+          <line class="fwd-line" x1="425" y1="168" x2="425" y2="96" marker-end="url(#arrow-fwd)"/>
+          <line class="grad-line" x1="125" y1="96" x2="125" y2="168" marker-end="url(#arrow-grad)"/><text class="grad" x="132" y="140">∂L/∂W₁, ∂L/∂b₁</text>
+          <line class="grad-line" x1="455" y1="96" x2="455" y2="168" marker-end="url(#arrow-grad)"/><text class="grad" x="462" y="140">∂L/∂W₂, ∂L/∂b₂</text>
+
+          <!-- legend -->
+          <line class="fwd-line" x1="560" y1="200" x2="590" y2="200"/><text class="muted" x="598" y="204">forward: values</text>
+          <line class="grad-line" x1="560" y1="225" x2="590" y2="225"/><text class="muted" x="598" y="229">backward: gradients</text>
+        </svg>
+        <figcaption>Values flow left to right. Gradients start as 1 at the loss and flow right to left; at each Linear layer they branch off to the weights.</figcaption>
+      </figure>
+
+      <h3 id="example-forward">Forward</h3>
+      <div class="table-wrap">
+        <table class="formulas">
+          <tr><th>Step</th><th>Formula</th><th>Shape</th></tr>
+          <tr><td>Linear</td><td class="math-cell">\(a = xW_1 + b_1\)</td><td>\(N \times H\)</td></tr>
+          <tr><td>tanh</td><td class="math-cell">\(h = \tanh(a)\)</td><td>\(N \times H\)</td></tr>
+          <tr><td>Linear</td><td class="math-cell">\(z = hW_2 + b_2\)</td><td>\(N \times C\)</td></tr>
+          <tr><td>Softmax</td><td class="math-cell">\(P = \operatorname{softmax}(z)\), row by row</td><td>\(N \times C\)</td></tr>
+          <tr><td>Cross-entropy</td><td class="math-cell">\(L = -\dfrac{1}{N}\displaystyle\sum_n \log P_{n,\,y_n}\)</td><td>scalar</td></tr>
+        </table>
+      </div>
+      <p>Cache \(x\), \(h\), \(P\) and the weights for the backward pass.</p>
+
+      <h3 id="example-backward">Backward</h3>
+      <p>In reverse order. \(Y\) is the one-hot matrix of targets. Each line is one layer's backward pass from the <a href="layers.html">Layers</a> page.</p>
+      \[
+      \begin{aligned}
+      \frac{\partial L}{\partial z} &= \tfrac{1}{N}\,(P - Y) && \text{softmax + cross-entropy} \\[6pt]
+      \frac{\partial L}{\partial W_2} &= h^\top \frac{\partial L}{\partial z}, \qquad \frac{\partial L}{\partial b_2} = \sum_n \frac{\partial L}{\partial z_n} && \text{second Linear: parameters} \\[6pt]
+      \frac{\partial L}{\partial h} &= \frac{\partial L}{\partial z}\, W_2^\top && \text{second Linear: input} \\[6pt]
+      \frac{\partial L}{\partial a} &= \frac{\partial L}{\partial h} \odot \bigl(1 - h^2\bigr) && \text{tanh} \\[6pt]
+      \frac{\partial L}{\partial W_1} &= x^\top \frac{\partial L}{\partial a}, \qquad \frac{\partial L}{\partial b_1} = \sum_n \frac{\partial L}{\partial a_n} && \text{first Linear: parameters}
+      \end{aligned}
+      \]
+      <p>\(\partial L/\partial x\) isn't needed: \(x\) is data, not a parameter. In a deeper network the same pattern repeats for every layer.</p>
+
+      <h3 id="example-loop">Training loop</h3>
+<pre><code>for step in range(steps):
+    xb, yb = get_batch()
+
+    # forward
+    a, c1 = linear_forward(xb, W1, b1)
+    h, c2 = tanh_forward(a)
+    z, c3 = linear_forward(h, W2, b2)
+    loss, dz = softmax_cross_entropy(z, yb)
+
+    # backward
+    dh, dW2, db2 = linear_backward(dz, c3)
+    da = tanh_backward(dh, c2)
+    _, dW1, db1 = linear_backward(da, c1)
+
+    # update
+    for p, g in ((W1, dW1), (b1, db1), (W2, dW2), (b2, db2)):
+        p -= lr * g</code></pre>
+      <p>In PyTorch, the forward pass records a graph and <code>loss.backward()</code> runs the backward pass for you; <code>optimizer.step()</code> does the update and <code>optimizer.zero_grad()</code> clears the accumulated gradients.</p>
+
+      <!-- ============================================================ -->
+      <h2 id="optimizers">Beyond plain SGD</h2>
+      <p>The optimizer decides how to turn the gradient \(g_t = \nabla_\theta L\) at step \(t\) into an update. Everything is element-wise.</p>
+
+      <h4>Momentum</h4>
+      <p>Keep a running average of past gradients, so steps build up speed in consistent directions and noise cancels out.</p>
+      \[ v_t = \mu\, v_{t-1} + g_t \qquad \theta_t = \theta_{t-1} - \eta\, v_t \qquad (\mu \approx 0.9) \]
+
+      <h4>Adam</h4>
+      <p>Momentum, plus a per-parameter step size: divide by a running average of the squared gradient, so parameters with large or noisy gradients take smaller steps.</p>
+      \[
+      \begin{aligned}
+      m_t &= \beta_1 m_{t-1} + (1 - \beta_1)\, g_t && \text{average gradient} \\
+      v_t &= \beta_2 v_{t-1} + (1 - \beta_2)\, g_t^2 && \text{average squared gradient} \\
+      \hat{m}_t &= \frac{m_t}{1 - \beta_1^t}, \quad \hat{v}_t = \frac{v_t}{1 - \beta_2^t} && \text{bias correction (both start at 0)} \\
+      \theta_t &= \theta_{t-1} - \eta\, \frac{\hat{m}_t}{\sqrt{\hat{v}_t} + \epsilon}
+      \end{aligned}
+      \]
+      <p>Typical values: \(\beta_1 = 0.9\), \(\beta_2 = 0.999\) (often 0.95 for transformers), \(\epsilon = 10^{-8}\).</p>
+
+      <h4>AdamW</h4>
+      <p>Adam with <strong>decoupled weight decay</strong>: shrink the weights directly, rather than adding \(\lambda\theta\) to the gradient (where Adam's scaling would distort it).</p>
+      \[ \theta_t = \theta_{t-1} - \eta \left( \frac{\hat{m}_t}{\sqrt{\hat{v}_t} + \epsilon} + \lambda\, \theta_{t-1} \right) \]
+      <p>Weight decay is usually applied to weight matrices only, not to biases or norm parameters (\(\gamma, \beta\)).</p>
+    </main>
+  </div>
+</body>
+</html>

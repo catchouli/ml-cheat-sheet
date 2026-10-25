@@ -11,7 +11,9 @@
     <nav>
       <a class="home" href="index.html">ML Cheat Sheet</a>
       <a href="math.html">Math</a>
-      <a href="backprop.html">Backprop</a>
+      <a href="gradient-descent.html">Gradient descent</a>
+      <a href="layers.html">Layers</a>
+      <a href="layernorm.html">LayerNorm</a>
       <a href="attention.html">Attention</a>
     </nav>
   </header>
@@ -19,11 +21,29 @@
     <main>
       <h1>ML Cheat Sheet</h1>
       <p class="lede">Formulas, definitions and diagrams I want to be able to look up again.</p>
-      <ul class="cards">
-        <li><a href="math.html"><strong>Math</strong><span>Exponents and logs, sums, derivatives, the chain rule, partial derivatives.</span></a></li>
-        <li><a href="backprop.html"><strong>Backprop</strong><span class="empty">Nothing here yet.</span></a></li>
-        <li><a href="attention.html"><strong>Attention</strong><span class="empty">Nothing here yet.</span></a></li>
-      </ul>
+
+      <section class="home-section">
+        <h2>Maths</h2>
+        <ul class="cards">
+          <li><a href="math.html"><strong>Math</strong><span>Exponents and logs, sums, derivatives, the chain rule, partial derivatives.</span></a></li>
+        </ul>
+      </section>
+
+      <section class="home-section">
+        <h2>Neural networks</h2>
+        <ul class="cards">
+          <li><a href="gradient-descent.html"><strong>Gradient descent</strong><span>Loss, gradients and updates, backprop as the chain rule, a 2-layer net worked through, Adam and AdamW.</span></a></li>
+          <li><a href="layers.html"><strong>Layers</strong><span>Linear, tanh, sigmoid, ReLU, GELU, softmax and losses: what each does, and its derivative.</span></a></li>
+          <li><a href="layernorm.html"><strong>LayerNorm</strong><span>What it does, and its backward pass derived step by step.</span></a></li>
+        </ul>
+      </section>
+
+      <section class="home-section">
+        <h2>Transformers</h2>
+        <ul class="cards">
+          <li><a href="attention.html"><strong>Attention</strong><span>Queries, keys and values, the causal mask, multi-head attention and its backward pass.</span></a></li>
+        </ul>
+      </section>
     </main>
   </div>
 </body>

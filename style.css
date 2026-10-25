@@ -9,6 +9,7 @@
   --example-bg: #f4f2ec;
   --note-bg: #fdf6e3;
   --note-border: #e8d9a8;
+  --grad: #b35a1f;
   --radius: 8px;
   --font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
@@ -26,6 +27,7 @@
     --example-bg: #202328;
     --note-bg: #2a2619;
     --note-border: #4d4529;
+    --grad: #e8a06a;
   }
 }
 
@@ -40,6 +42,7 @@
   --example-bg: #202328;
   --note-bg: #2a2619;
   --note-border: #4d4529;
+  --grad: #e8a06a;
 }
 
 * { box-sizing: border-box; }
@@ -213,3 +216,65 @@ h4 { font-size: 1rem; margin: 1.25rem 0 0.25rem; color: var(--muted); }
 .cards strong { display: block; font-size: 1.15rem; color: var(--accent); margin-bottom: 0.25rem; }
 .cards span { color: var(--muted); font-size: 0.92rem; }
 .cards .empty { font-style: italic; }
+
+/* ---- Home page sections ---- */
+
+.home-section { margin-top: 2rem; }
+.home-section h2 { border: 0; margin: 0 0 0.25rem; padding: 0; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+.home-section .cards { margin-top: 0.5rem; }
+
+/* ---- Diagrams ---- */
+
+.diagram {
+  overflow-x: auto;
+  margin: 1rem 0 1.25rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.75rem;
+}
+
+.diagram svg { display: block; width: 100%; height: auto; min-width: 40rem; }
+.diagram.small svg { min-width: 0; max-width: 22rem; margin: 0 auto; }
+.diagram figcaption { font-size: 0.85rem; color: var(--muted); margin-top: 0.5rem; }
+.diagram text { fill: var(--text); font: 14px var(--font); }
+.diagram text.muted { fill: var(--muted); font-size: 12px; }
+.diagram text.grad { fill: var(--grad); }
+.diagram text.fwd { fill: var(--accent); }
+.diagram .box { fill: var(--example-bg); stroke: var(--border); stroke-width: 1.5; }
+.diagram .param { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 1; }
+.diagram .fwd-line { stroke: var(--accent); stroke-width: 2; fill: none; }
+.diagram .grad-line { stroke: var(--grad); stroke-width: 2; fill: none; stroke-dasharray: 6 4; }
+.diagram .cell-on { fill: var(--accent); }
+.diagram .cell-off { fill: none; stroke: var(--border); stroke-width: 1; }
+
+/* ---- Step lists (derivations) ---- */
+
+.steps { counter-reset: step; padding: 0; list-style: none; }
+.steps > li { counter-increment: step; position: relative; padding-left: 2.25rem; margin: 1rem 0; }
+.steps > li::before {
+  content: counter(step);
+  position: absolute; left: 0; top: 0.1rem;
+  width: 1.6rem; height: 1.6rem; border-radius: 50%;
+  background: var(--accent-soft); color: var(--accent);
+  font-weight: 700; font-size: 0.85rem;
+  display: flex; align-items: center; justify-content: center;
+}
+
+.result {
+  border: 2px solid var(--accent);
+  border-radius: var(--radius);
+  padding: 0.25rem 1rem;
+  margin: 1rem 0;
+  background: var(--surface);
+}
+
+pre {
+  background: var(--example-bg);
+  border-radius: var(--radius);
+  padding: 0.75rem 1rem;
+  overflow-x: auto;
+  font-size: 0.88rem;
+  line-height: 1.5;
+}
+pre code { background: none; padding: 0; }

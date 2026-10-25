@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Layers · ML Cheat Sheet</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js" onload="renderMathInElement(document.body)"></script>
+</head>
+<body>
+  <header class="site-header">
+    <nav>
+      <a class="home" href="index.html">ML Cheat Sheet</a>
+      <a href="math.html">Math</a>
+      <a href="gradient-descent.html">Gradient descent</a>
+      <a href="layers.html" aria-current="page">Layers</a>
+      <a href="layernorm.html">LayerNorm</a>
+      <a href="attention.html">Attention</a>
+    </nav>
+  </header>
+
+  <div class="page with-toc">
+    <nav class="toc" aria-label="On this page">
+      <h2>On this page</h2>
+      <ol>
+        <li><a href="#conventions">Conventions</a></li>
+        <li><a href="#linear">Linear</a></li>
+        <li><a href="#activations">Activations</a>
+          <ol>
+            <li><a href="#tanh">tanh</a></li>
+            <li><a href="#sigmoid">Sigmoid</a></li>
+            <li><a href="#relu">ReLU</a></li>
+            <li><a href="#gelu">GELU</a></li>
+          </ol>
+        </li>
+        <li><a href="#softmax">Softmax</a></li>
+        <li><a href="#losses">Losses</a>
+          <ol>
+            <li><a href="#mse">Mean squared error</a></li>
+            <li><a href="#cross-entropy">Softmax + cross-entropy</a></li>
+          </ol>
+        </li>
+        <li><a href="#elsewhere">Elsewhere</a></li>
+      </ol>
+    </nav>
+
+    <main>
+      <h1>Layers</h1>
+      <p class="lede">The building blocks, one at a time: what each does, what it's for, its derivative, and where the derivative comes from.</p>
+
+      <!-- ============================================================ -->
+      <h2 id="conventions">Conventions</h2>
+      <div class="table-wrap">
+        <table class="formulas">
+          <tr><th>Notation</th><th>Meaning</th></tr>
+          <tr><td class="math-cell">\(x \to y\)</td><td>The layer's input and output.</td></tr>
+          <tr><td class="math-cell">\(\dfrac{\partial L}{\partial y}\)</td><td>Upstream gradient, given to the backward pass. <code>dout</code> in code.</td></tr>
+          <tr><td class="math-cell">\(\odot\)</td><td>Element-wise product (<code>*</code> in NumPy).</td></tr>
+          <tr><td class="math-cell">\(N\)</td><td>Batch size: rows are examples.</td></tr>
+        </table>
+      </div>
+      <p>For an element-wise function \(y = f(x)\), the backward pass is always \(\dfrac{\partial L}{\partial x} = \dfrac{\partial L}{\partial y} \odot f'(x)\), so for the activations below only \(f'\) matters.</p>
+
+      <!-- ============================================================ -->
+      <h2 id="linear">Linear</h2>
+      \[ y = xW + b \qquad x: N \times D_{\text{in}}, \quad W: D_{\text{in}} \times D_{\text{out}}, \quad b: D_{\text{out}} \]
+      <p><strong>What it does:</strong> each output is a weighted sum of all the inputs, plus a bias. It mixes features together and changes the vector's size.</p>
+      <p><strong>Used for:</strong> almost everything with learnable weights: hidden layers, the q/k/v projections in attention, the output layer that produces logits.</p>
+      <div class="result">
+        \[ \frac{\partial L}{\partial x} = \frac{\partial L}{\partial y}\, W^\top \qquad \frac{\partial L}{\partial W} = x^\top \frac{\partial L}{\partial y} \qquad \frac{\partial L}{\partial b} = \sum_{n} \frac{\partial L}{\partial y_n} \]
+      </div>
+      <p><strong>Derivation:</strong> \(y_{nj} = \sum_k x_{nk} W_{kj} + b_j\). The \(x\) and \(W\) gradients are the <a href="math.html#multivariable-chain-rule">linear layer example</a> on the Math page. \(b_j\) is added to every row \(n\), so it reaches \(L\) through all of them, each with local derivative 1: sum over \(n\).</p>
+      <p><strong>Cache:</strong> \(x\) and \(W\).</p>
+
+      <!-- ============================================================ -->
+      <h2 id="activations">Activations</h2>
+      <p>Non-linear functions applied element-wise between linear layers. Without them, a stack of linear layers collapses into a single linear layer (\(xW_1W_2 = xW'\)), however deep it is.</p>
+
+      <h3 id="tanh">tanh</h3>
+      \[ \tanh x = \frac{e^x - e^{-x}}{e^x + e^{-x}} \qquad \text{range } (-1, 1) \]
+      <p><strong>What it does:</strong> squashes any number into \((-1, 1)\), roughly linear near 0 and flat for large \(|x|\). Centred on zero.</p>
+      <p><strong>Used for:</strong> hidden layers in small and older networks, RNN cells, and inside the tanh approximation of GELU.</p>
+      <div class="result">
+        \[ \frac{d}{dx}\tanh x = 1 - \tanh^2 x \qquad\Longrightarrow\qquad \frac{\partial L}{\partial x} = \frac{\partial L}{\partial y} \odot (1 - y^2) \]
+      </div>
+      <div class="example">
+        <span class="label">Derivation</span>
+        <p>Quotient rule with \(u = e^x - e^{-x}\) and \(v = e^x + e^{-x}\). Note \(u' = v\) and \(v' = u\):</p>
+        \[ \frac{d}{dx}\frac{u}{v} = \frac{u'v - uv'}{v^2} = \frac{v^2 - u^2}{v^2} = 1 - \left(\frac{u}{v}\right)^2 = 1 - \tanh^2 x \]
+      </div>
+      <p><strong>Cache:</strong> the output \(y\), since the derivative is written in terms of it. Gradients vanish for large \(|x|\), where \(1 - y^2 \approx 0\) (saturation).</p>
+
+      <h3 id="sigmoid">Sigmoid</h3>
+      \[ \sigma(x) = \frac{1}{1 + e^{-x}} \qquad \text{range } (0, 1) \]
+      <p><strong>What it does:</strong> squashes any number into \((0, 1)\). \(\sigma(0) = \tfrac12\). It's a shifted, scaled tanh: \(\sigma(x) = \tfrac12\bigl(1 + \tanh(x/2)\bigr)\).</p>
+      <p><strong>Used for:</strong> probabilities of yes/no outcomes (binary classification), and gates that scale something between “off” and “on” (LSTMs, SiLU/SwiGLU).</p>
+      <div class="result">
+        \[ \sigma'(x) = \sigma(x)\bigl(1 - \sigma(x)\bigr) \qquad\Longrightarrow\qquad \frac{\partial L}{\partial x} = \frac{\partial L}{\partial y} \odot y(1 - y) \]
+      </div>
+      <div class="example">
+        <span class="label">Derivation</span>
+        <p>Write \(\sigma = (1 + e^{-x})^{-1}\) and use the chain rule (power rule outside, \(e^{-x}\) inside):</p>
+        \[ \sigma'(x) = -(1 + e^{-x})^{-2} \cdot \bigl(-e^{-x}\bigr) = \frac{1}{1 + e^{-x}} \cdot \frac{e^{-x}}{1 + e^{-x}} \]
+        <p>The second factor is \(1 - \sigma(x)\), because \(\dfrac{e^{-x}}{1 + e^{-x}} = \dfrac{(1 + e^{-x}) - 1}{1 + e^{-x}} = 1 - \dfrac{1}{1 + e^{-x}}\).</p>
+      </div>
+      <p>The maximum slope is \(\tfrac14\) at \(x = 0\), so stacked sigmoids shrink gradients quickly. That's why hidden layers moved to tanh, then ReLU.</p>
+
+      <h3 id="relu">ReLU</h3>
+      \[ \operatorname{ReLU}(x) = \max(0, x) \]
+      <p><strong>What it does:</strong> passes positive values through unchanged and zeroes negative ones.</p>
+      <p><strong>Used for:</strong> the default hidden-layer activation for most of the 2010s (CNNs, MLPs). It's cheap, and positive inputs never saturate, so gradients pass through deep stacks undiminished.</p>
+      <div class="result">
+        \[ \frac{d}{dx}\operatorname{ReLU}(x) = \begin{cases} 1 & x \gt 0 \\ 0 & x \le 0 \end{cases} \qquad\Longrightarrow\qquad \frac{\partial L}{\partial x} = \frac{\partial L}{\partial y} \odot [x \gt 0] \]
+      </div>
+      <p><strong>Derivation:</strong> each piece is linear: slope 1 on the right, slope 0 on the left. The derivative at exactly 0 is undefined; frameworks use 0.</p>
+      <p><strong>Cache:</strong> the mask \(x \gt 0\). A unit whose input is negative for every example gets no gradient at all and never recovers (a “dead” ReLU).</p>
+
+      <h3 id="gelu">GELU</h3>
+      \[ \operatorname{GELU}(x) = x\,\Phi(x) \qquad \Phi(x) = \tfrac12\Bigl(1 + \operatorname{erf}\bigl(x/\sqrt2\bigr)\Bigr) \]
+      <p><strong>What it does:</strong> a smooth ReLU. \(\Phi\) is the standard normal CDF, which goes smoothly from 0 to 1, so GELU scales each input by “how positive it is”. Large positive inputs pass through, large negative ones go to 0, with a smooth dip just below zero.</p>
+      <p><strong>Used for:</strong> the MLP inside GPT-2, BERT and many other transformers.</p>
+      <div class="result">
+        \[ \operatorname{GELU}'(x) = \Phi(x) + x\,\phi(x) \qquad \phi(x) = \frac{1}{\sqrt{2\pi}}\, e^{-x^2/2} \]
+      </div>
+      <p><strong>Derivation:</strong> product rule on \(x \cdot \Phi(x)\); the derivative of a CDF is its PDF, \(\Phi' = \phi\).</p>
+      <div class="note">
+        <p>The <strong>tanh approximation</strong>, \(\tfrac12 x\bigl(1 + \tanh\bigl(\sqrt{2/\pi}\,(x + 0.044715\,x^3)\bigr)\bigr)\), was used when erf was slow. PyTorch's <code>F.gelu</code> uses the exact form by default; <code>approximate="tanh"</code> gives this one.</p>
+      </div>
+
+      <!-- ============================================================ -->
+      <h2 id="softmax">Softmax</h2>
+      \[ p_i = \operatorname{softmax}(z)_i = \frac{e^{z_i}}{\sum_k e^{z_k}} \]
+      <p><strong>What it does:</strong> turns a vector of arbitrary scores (logits) into a probability distribution: every \(p_i\) is in \((0, 1)\) and they sum to 1. Bigger scores get exponentially more of the share. Adding the same constant to every \(z_i\) changes nothing.</p>
+      <p><strong>Used for:</strong> the model's output (probabilities over classes or next tokens), and attention weights (how much each position attends to each other position).</p>
+      <p><strong>Computing it:</strong> subtract the row's maximum first, \(p_i = e^{z_i - m} / \sum_k e^{z_k - m}\), so \(e^x\) can't overflow.</p>
+
+      <h4>Jacobian</h4>
+      <p>Every output depends on every input, through the sum:</p>
+      <div class="result">
+        \[ \frac{\partial p_i}{\partial z_j} = p_i\,(\delta_{ij} - p_j) = \begin{cases} p_i(1 - p_i) & i = j \\ -p_i\,p_j & i \ne j \end{cases} \]
+      </div>
+      <div class="example">
+        <span class="label">Derivation</span>
+        <p>Let \(S = \sum_k e^{z_k}\), so \(p_i = e^{z_i}/S\) and \(\partial S/\partial z_j = e^{z_j}\). Quotient rule:</p>
+        \[ i = j: \quad \frac{e^{z_i} S - e^{z_i} e^{z_i}}{S^2} = \frac{e^{z_i}}{S} - \left(\frac{e^{z_i}}{S}\right)^2 = p_i - p_i^2 \]
+        \[ i \ne j: \quad \frac{0 \cdot S - e^{z_i} e^{z_j}}{S^2} = -\frac{e^{z_i}}{S}\cdot\frac{e^{z_j}}{S} = -p_i\,p_j \]
+      </div>
+
+      <h4>Backward pass</h4>
+      <div class="result">
+        \[ \frac{\partial L}{\partial z_j} = p_j \left( \frac{\partial L}{\partial p_j} - \sum_i \frac{\partial L}{\partial p_i}\, p_i \right) \]
+      </div>
+      <div class="example">
+        <span class="label">Derivation</span>
+        <p>Multivariable chain rule over every output \(p_i\), then the Jacobian:</p>
+        \[ \frac{\partial L}{\partial z_j} = \sum_i \frac{\partial L}{\partial p_i}\, p_i(\delta_{ij} - p_j) = \frac{\partial L}{\partial p_j}\, p_j - p_j \sum_i \frac{\partial L}{\partial p_i}\, p_i \]
+        <p>The \(\delta_{ij}\) picks out the \(i = j\) term from the first part of the sum.</p>
+      </div>
+      <p>In code, row by row: <code>dz = p * (dp - (dp * p).sum(axis=-1, keepdims=True))</code>. No need to build the \(C \times C\) Jacobian. <strong>Cache:</strong> the output \(p\).</p>
+
+      <!-- ============================================================ -->
+      <h2 id="losses">Losses</h2>
+      <p>The last layer. Its output is a single number, and its backward pass starts the chain with \(\partial L/\partial L = 1\), so it takes no upstream gradient.</p>
+
+      <h3 id="mse">Mean squared error</h3>
+      \[ L = \frac{1}{N} \sum_n (\hat{y}_n - y_n)^2 \]
+      <p><strong>What it does:</strong> averages the squared distance between prediction and target. Squaring makes it positive and punishes big misses much more than small ones.</p>
+      <p><strong>Used for:</strong> regression: predicting numbers rather than classes.</p>
+      <div class="result">
+        \[ \frac{\partial L}{\partial \hat{y}_n} = \frac{2}{N}\,(\hat{y}_n - y_n) \]
+      </div>
+      <p><strong>Derivation:</strong> only the \(n\)-th term contains \(\hat{y}_n\); chain rule on the square gives \(2(\hat{y}_n - y_n)\), times the \(\tfrac1N\) in front.</p>
+
+      <h3 id="cross-entropy">Softmax + cross-entropy</h3>
+      \[ L = -\frac{1}{N} \sum_n \log p_{n,\,y_n} \qquad p_n = \operatorname{softmax}(z_n) \]
+      <p><strong>What it does:</strong> looks at the probability the model gave the correct class, \(p_{n, y_n}\), and takes \(-\log\) of it. That's 0 when the model is certain and right, and grows without limit as the probability of the right answer goes to 0. Averaged over the batch.</p>
+      <p><strong>Used for:</strong> any classification, including language models, where the classes are the possible next tokens. A model that guesses uniformly over \(C\) classes scores \(\log C\).</p>
+      <p><strong>Computing it:</strong> never take \(\log\) of a probability. Use log-softmax directly:</p>
+      \[ \log p_{n,\,y_n} = z_{n,\,y_n} - \log \sum_k e^{z_{n,k}} = (z_{n,\,y_n} - m_n) - \log \sum_k e^{z_{n,k} - m_n} \]
+      <div class="result">
+        \[ \frac{\partial L}{\partial z} = \frac{1}{N}\,(P - Y) \]
+        <p>\(P\) is the softmax output and \(Y\) the one-hot targets: the probabilities, minus 1 at each correct class, divided by \(N\).</p>
+      </div>
+      <div class="example">
+        <span class="label">Derivation</span>
+        <p>For one example, using the log-softmax form with target \(y\):</p>
+        \[ \ell = -z_y + \log \sum_k e^{z_k} \]
+        \[ \frac{\partial \ell}{\partial z_j} = -\delta_{jy} + \frac{1}{\sum_k e^{z_k}} \cdot e^{z_j} = p_j - \delta_{jy} \]
+        <p>The first term is 1 only for the target class. The second is the chain rule through the log, then \(\partial/\partial z_j\) of the sum, which picks out \(e^{z_j}\). The mean over \(N\) examples divides each by \(N\).</p>
+      </div>
+      <p>It's one function returning both the loss and \(\partial L/\partial z\). Going through softmax and log separately gives the same answer, but via the full Jacobian and a \(1/p\) that can blow up; together, everything cancels.</p>
+
+      <!-- ============================================================ -->
+      <h2 id="elsewhere">Elsewhere</h2>
+      <ul>
+        <li><a href="layernorm.html"><strong>LayerNorm</strong></a> has its own page: the derivation is long.</li>
+        <li><a href="attention.html#backward"><strong>Attention</strong></a>'s backward pass is on the Attention page. It's matrix products plus a softmax.</li>
+      </ul>
+    </main>
+  </div>
+</body>
+</html>

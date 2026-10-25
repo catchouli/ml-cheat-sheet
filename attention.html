@@ -14,14 +14,155 @@
     <nav>
       <a class="home" href="index.html">ML Cheat Sheet</a>
       <a href="math.html">Math</a>
-      <a href="backprop.html">Backprop</a>
+      <a href="gradient-descent.html">Gradient descent</a>
+      <a href="layers.html">Layers</a>
+      <a href="layernorm.html">LayerNorm</a>
       <a href="attention.html" aria-current="page">Attention</a>
     </nav>
   </header>
-  <div class="page">
+
+  <div class="page with-toc">
+    <nav class="toc" aria-label="On this page">
+      <h2>On this page</h2>
+      <ol>
+        <li><a href="#what">What it does</a></li>
+        <li><a href="#formula">Scaled dot-product attention</a>
+          <ol>
+            <li><a href="#scaling">Why divide by √d</a></li>
+            <li><a href="#causal">The causal mask</a></li>
+          </ol>
+        </li>
+        <li><a href="#multi-head">Multi-head attention</a></li>
+        <li><a href="#backward">Backward pass</a></li>
+        <li><a href="#cost">Cost</a></li>
+      </ol>
+    </nav>
+
     <main>
       <h1>Attention</h1>
-      <p class="lede">Nothing here yet.</p>
+      <p class="lede">The part of a transformer that moves information between positions.</p>
+
+      <!-- ============================================================ -->
+      <h2 id="what">What it does</h2>
+      <p>Each position in the sequence builds its output as a weighted average of information from other positions. The weights depend on content: how well what this position is looking for matches what each other position contains. Each position produces three vectors from its own embedding:</p>
+      <div class="table-wrap">
+        <table class="formulas">
+          <tr><th>Vector</th><th>Role</th></tr>
+          <tr><td class="math-cell">Query \(q\)</td><td>What am I looking for?</td></tr>
+          <tr><td class="math-cell">Key \(k\)</td><td>What do I contain? (What queries should match me?)</td></tr>
+          <tr><td class="math-cell">Value \(v\)</td><td>What do I pass on to whoever attends to me?</td></tr>
+        </table>
+      </div>
+      <p>Attention itself has no notion of order: shuffle the positions and each output just moves with its input. Position comes from elsewhere, such as learned position embeddings or RoPE.</p>
+      <p>Attention moves information <em>between</em> positions; the MLP that follows it in each block processes each position on its own.</p>
+
+      <!-- ============================================================ -->
+      <h2 id="formula">Scaled dot-product attention</h2>
+      <div class="result">
+        \[ \operatorname{Attention}(Q, K, V) = \operatorname{softmax}\!\left( \frac{QK^\top}{\sqrt{d}} + M \right) V \]
+      </div>
+      <p>One head, \(T\) positions, head size \(d\). Softmax is over each row.</p>
+      <div class="table-wrap">
+        <table class="formulas">
+          <tr><th>Step</th><th>Formula</th><th>Shape</th></tr>
+          <tr><td>Scores</td><td class="math-cell">\(S = QK^\top / \sqrt{d}\) &nbsp; (\(S_{tj} = q_t \cdot k_j / \sqrt{d}\))</td><td>\(T \times T\)</td></tr>
+          <tr><td>Mask</td><td class="math-cell">\(S + M\), with \(M_{tj} = -\infty\) where \(t\) may not see \(j\), else 0</td><td>\(T \times T\)</td></tr>
+          <tr><td>Weights</td><td class="math-cell">\(A = \operatorname{softmax}(S + M)\), each row sums to 1</td><td>\(T \times T\)</td></tr>
+          <tr><td>Output</td><td class="math-cell">\(O = AV\) &nbsp; (\(o_t = \sum_j A_{tj}\, v_j\))</td><td>\(T \times d\)</td></tr>
+        </table>
+      </div>
+
+      <h3 id="scaling">Why divide by √d</h3>
+      <p>If the entries of \(q\) and \(k\) are independent with mean 0 and variance 1, then</p>
+      \[ \operatorname{Var}(q \cdot k) = \operatorname{Var}\left(\sum_{i=1}^{d} q_i k_i\right) = \sum_{i=1}^{d} \operatorname{Var}(q_i k_i) = d \]
+      <p>so dot products grow with the head size. Large scores push the softmax towards one-hot, where its gradients are nearly zero. Dividing by \(\sqrt{d}\) brings the variance back to 1.</p>
+
+      <h3 id="causal">The causal mask</h3>
+      <p>A language model is trained to predict token \(t + 1\) at position \(t\). If position \(t\) could see later positions, it could just copy the answer. So position \(t\) may only attend to positions \(j \le t\):</p>
+      \[ M_{tj} = \begin{cases} 0 & j \le t \\ -\infty & j \gt t \end{cases} \]
+
+      <figure class="diagram small">
+        <svg viewBox="0 0 240 230" role="img" aria-label="A 6 by 6 grid of attention weights: the lower triangle including the diagonal is filled, the upper triangle is masked out">
+          <text class="muted" x="135" y="14" text-anchor="middle">key position j →</text>
+          <text class="muted" x="22" y="114" text-anchor="middle" transform="rotate(90 22 114)">query position t →</text>
+          <g transform="translate(45 25)">
+            <rect class="cell-on" x="0" y="0" width="28" height="28" opacity="1"/>
+            <rect class="cell-off" x="30" y="0" width="28" height="28"/><rect class="cell-off" x="60" y="0" width="28" height="28"/><rect class="cell-off" x="90" y="0" width="28" height="28"/><rect class="cell-off" x="120" y="0" width="28" height="28"/><rect class="cell-off" x="150" y="0" width="28" height="28"/>
+            <rect class="cell-on" x="0" y="30" width="28" height="28" opacity="0.35"/><rect class="cell-on" x="30" y="30" width="28" height="28" opacity="0.65"/>
+            <rect class="cell-off" x="60" y="30" width="28" height="28"/><rect class="cell-off" x="90" y="30" width="28" height="28"/><rect class="cell-off" x="120" y="30" width="28" height="28"/><rect class="cell-off" x="150" y="30" width="28" height="28"/>
+            <rect class="cell-on" x="0" y="60" width="28" height="28" opacity="0.2"/><rect class="cell-on" x="30" y="60" width="28" height="28" opacity="0.6"/><rect class="cell-on" x="60" y="60" width="28" height="28" opacity="0.2"/>
+            <rect class="cell-off" x="90" y="60" width="28" height="28"/><rect class="cell-off" x="120" y="60" width="28" height="28"/><rect class="cell-off" x="150" y="60" width="28" height="28"/>
+            <rect class="cell-on" x="0" y="90" width="28" height="28" opacity="0.1"/><rect class="cell-on" x="30" y="90" width="28" height="28" opacity="0.15"/><rect class="cell-on" x="60" y="90" width="28" height="28" opacity="0.6"/><rect class="cell-on" x="90" y="90" width="28" height="28" opacity="0.15"/>
+            <rect class="cell-off" x="120" y="90" width="28" height="28"/><rect class="cell-off" x="150" y="90" width="28" height="28"/>
+            <rect class="cell-on" x="0" y="120" width="28" height="28" opacity="0.5"/><rect class="cell-on" x="30" y="120" width="28" height="28" opacity="0.1"/><rect class="cell-on" x="60" y="120" width="28" height="28" opacity="0.1"/><rect class="cell-on" x="90" y="120" width="28" height="28" opacity="0.1"/><rect class="cell-on" x="120" y="120" width="28" height="28" opacity="0.2"/>
+            <rect class="cell-off" x="150" y="120" width="28" height="28"/>
+            <rect class="cell-on" x="0" y="150" width="28" height="28" opacity="0.1"/><rect class="cell-on" x="30" y="150" width="28" height="28" opacity="0.1"/><rect class="cell-on" x="60" y="150" width="28" height="28" opacity="0.1"/><rect class="cell-on" x="90" y="150" width="28" height="28" opacity="0.4"/><rect class="cell-on" x="120" y="150" width="28" height="28" opacity="0.1"/><rect class="cell-on" x="150" y="150" width="28" height="28" opacity="0.2"/>
+          </g>
+        </svg>
+        <figcaption>Attention weights \(A\) for 6 positions (stronger colour = more weight; made-up values). Each row sums to 1. Empty cells are masked: \(-\infty\) before the softmax, exactly 0 after.</figcaption>
+      </figure>
+
+      <p>The diagonal is always allowed, so every row has at least one finite score, and the softmax never sees a row of all \(-\infty\).</p>
+      <div class="note">
+        <p><strong>Fewer queries than keys</strong> (a KV cache, where new queries attend to cached keys): with \(T_q\) queries and \(T_k\) keys, query \(i\) sits at position \(T_k - T_q + i\), so it may see keys \(j \le i + (T_k - T_q)\). In PyTorch: <code>torch.ones(Tq, Tk, dtype=torch.bool).tril(diagonal=Tk - Tq)</code>. When \(T_q = T_k\), that's the usual mask.</p>
+      </div>
+
+      <!-- ============================================================ -->
+      <h2 id="multi-head">Multi-head attention</h2>
+      <p>Rather than one attention over the full model width \(C\), split it into \(H\) heads of size \(d = C / H\), run attention in each independently, and concatenate. Each head can learn a different pattern, such as “the previous token” or “the matching bracket”. The total cost is the same as one big head.</p>
+      \[
+      \begin{aligned}
+      Q,\, K,\, V &= XW_Q,\; XW_K,\; XW_V && W_Q, W_K, W_V: C \times C \text{ (often one } C \times 3C \text{ matrix)} \\
+      \text{head}_h &= \operatorname{Attention}(Q_h, K_h, V_h) && Q_h = \text{columns } [hd, (h+1)d) \text{ of } Q \\
+      \operatorname{MultiHead}(X) &= \operatorname{Concat}(\text{head}_1, \dots, \text{head}_H)\, W_O && W_O: C \times C
+      \end{aligned}
+      \]
+      <div class="table-wrap">
+        <table class="formulas">
+          <tr><th>Step</th><th>Shape</th><th>PyTorch</th></tr>
+          <tr><td>Input</td><td>\((B, T, C)\)</td><td></td></tr>
+          <tr><td>Project, split q/k/v</td><td>\(3 \times (B, T, C)\)</td><td><code>self.qkv(x).split(C, dim=-1)</code></td></tr>
+          <tr><td>Split heads</td><td>\((B, H, T, d)\)</td><td><code>q.view(B, T, H, d).transpose(1, 2)</code></td></tr>
+          <tr><td>Attention per head</td><td>\((B, H, T, d)\)</td><td><code>attention(q, k, v)</code></td></tr>
+          <tr><td>Merge heads</td><td>\((B, T, C)\)</td><td><code>out.transpose(1, 2).reshape(B, T, C)</code></td></tr>
+          <tr><td>Output projection</td><td>\((B, T, C)\)</td><td><code>self.proj(out)</code></td></tr>
+        </table>
+      </div>
+      <p><code>transpose</code> makes the tensor non-contiguous, so merging needs <code>reshape</code> (or <code>.contiguous().view(...)</code>), not plain <code>view</code>.</p>
+
+      <!-- ============================================================ -->
+      <h2 id="backward">Backward pass</h2>
+      <p>For one head, given \(\partial L / \partial O\). Forward was \(S = QK^\top/\sqrt{d}\) (masked), \(A = \operatorname{softmax}(S)\), \(O = AV\). Every step reuses a rule from the <a href="layers.html">Layers</a> page.</p>
+      <div class="result">
+        \[
+        \begin{aligned}
+        \frac{\partial L}{\partial V} &= A^\top \frac{\partial L}{\partial O} \qquad\qquad \frac{\partial L}{\partial A} = \frac{\partial L}{\partial O}\, V^\top \\[6pt]
+        \frac{\partial L}{\partial S} &= A \odot \left( \frac{\partial L}{\partial A} - \operatorname{rowsum}\!\left( \frac{\partial L}{\partial A} \odot A \right) \right) \\[6pt]
+        \frac{\partial L}{\partial Q} &= \frac{1}{\sqrt{d}}\, \frac{\partial L}{\partial S}\, K \qquad\qquad \frac{\partial L}{\partial K} = \frac{1}{\sqrt{d}} \left(\frac{\partial L}{\partial S}\right)^{\!\top} Q
+        \end{aligned}
+        \]
+      </div>
+      <div class="table-wrap">
+        <table class="formulas">
+          <tr><th>Line</th><th>Where it comes from</th></tr>
+          <tr><td>\(V\) and \(A\)</td><td>Matrix product \(O = AV\): \(\partial A = \partial O\, V^\top\), \(\partial V = A^\top \partial O\).</td></tr>
+          <tr><td>\(S\)</td><td><a href="layers.html#softmax">Softmax backward</a>, row by row. The rowsum is a \(T \times 1\) column, broadcast across each row.</td></tr>
+          <tr><td>\(Q\) and \(K\)</td><td>Matrix product \(S = Q K^\top / \sqrt{d}\), treating \(K^\top\) as the weight: \(\partial Q = \partial S\, K / \sqrt{d}\), and \(\partial K = (\partial S)^\top Q / \sqrt{d}\) from \(\partial (K^\top) = Q^\top \partial S / \sqrt{d}\), transposed.</td></tr>
+        </table>
+      </div>
+      <p>Masked positions have \(A_{tj} = 0\), so \(\partial L / \partial S_{tj} = 0\) there too: no gradient flows through a connection that wasn't used, without any special handling. <strong>Cache:</strong> \(Q\), \(K\), \(V\) and \(A\).</p>
+      <p>For multi-head attention, the reshapes and transposes just move gradients back to where their values came from, and the projections are ordinary <a href="layers.html#linear">linear layers</a>.</p>
+
+      <!-- ============================================================ -->
+      <h2 id="cost">Cost</h2>
+      <div class="table-wrap">
+        <table class="formulas">
+          <tr><th>What</th><th>Per head</th></tr>
+          <tr><td>Compute</td><td class="math-cell">\(O(T^2 d)\): two \(T \times T\)-sized matrix products</td></tr>
+          <tr><td>Memory</td><td class="math-cell">\(O(T^2)\) for the scores and weights</td></tr>
+        </table>
+      </div>
+      <p>The \(T^2\) is why context length is expensive. Fused kernels like FlashAttention (behind <code>F.scaled_dot_product_attention</code>) compute the same result in tiles, without ever storing the full \(T \times T\) matrix. During generation, a KV cache stores past keys and values so each new token costs \(O(Td)\) rather than recomputing everything.</p>
     </main>
   </div>
 </body>

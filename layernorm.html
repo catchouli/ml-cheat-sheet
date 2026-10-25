@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LayerNorm · ML Cheat Sheet</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js" onload="renderMathInElement(document.body)"></script>
+</head>
+<body>
+  <header class="site-header">
+    <nav>
+      <a class="home" href="index.html">ML Cheat Sheet</a>
+      <a href="math.html">Math</a>
+      <a href="gradient-descent.html">Gradient descent</a>
+      <a href="layers.html">Layers</a>
+      <a href="layernorm.html" aria-current="page">LayerNorm</a>
+      <a href="attention.html">Attention</a>
+    </nav>
+  </header>
+
+  <div class="page with-toc">
+    <nav class="toc" aria-label="On this page">
+      <h2>On this page</h2>
+      <ol>
+        <li><a href="#what">What it does</a></li>
+        <li><a href="#forward">Forward</a></li>
+        <li><a href="#result">Gradients: the result</a></li>
+        <li><a href="#derivation">Derivation</a>
+          <ol>
+            <li><a href="#gamma-beta">γ and β</a></li>
+            <li><a href="#into-xhat">Into x̂</a></li>
+            <li><a href="#through-xhat">Through x̂ to x</a></li>
+          </ol>
+        </li>
+        <li><a href="#sanity">Sanity checks</a></li>
+        <li><a href="#code">In code</a></li>
+      </ol>
+    </nav>
+
+    <main>
+      <h1>LayerNorm</h1>
+      <p class="lede">Normalise each example's features to mean 0 and variance 1, then let the network rescale them.</p>
+
+      <!-- ============================================================ -->
+      <h2 id="what">What it does</h2>
+      <p>For each row (one example, or one token in a transformer), LayerNorm subtracts the row's mean and divides by its standard deviation, so the row has mean 0 and variance 1. Then a learnable scale \(\gamma\) and shift \(\beta\), one per feature, let the network undo or adjust that wherever it helps.</p>
+      <p><strong>Used for:</strong> keeping activations at a steady scale through a deep network, which makes training much more stable. In a transformer there's one before attention and one before the MLP in every block (“pre-LN”), and one at the end before the output layer.</p>
+      <p>Each row is normalised on its own, so it works the same at any batch size, unlike BatchNorm, which normalises each feature across the batch.</p>
+
+      <!-- ============================================================ -->
+      <h2 id="forward">Forward</h2>
+      <p>For one row \(x = (x_1, \dots, x_D)\):</p>
+      \[
+      \begin{aligned}
+      \mu &= \frac{1}{D} \sum_{j=1}^{D} x_j && \text{mean} \\
+      \sigma^2 &= \frac{1}{D} \sum_{j=1}^{D} (x_j - \mu)^2 && \text{variance (biased: divide by } D\text{)} \\
+      \hat{x}_i &= \frac{x_i - \mu}{\sqrt{\sigma^2 + \epsilon}} && \text{normalised} \\
+      y_i &= \gamma_i\, \hat{x}_i + \beta_i && \text{scale and shift}
+      \end{aligned}
+      \]
+      <p>\(\epsilon\) (around \(10^{-5}\)) stops a division by zero when every \(x_j\) in the row is equal. \(\gamma\) starts at 1 and \(\beta\) at 0, so a new LayerNorm is a plain normalisation.</p>
+      <p><strong>Cache:</strong> \(\hat{x}\), \(1/\sqrt{\sigma^2 + \epsilon}\) and \(\gamma\). That's everything the backward pass needs.</p>
+
+      <!-- ============================================================ -->
+      <h2 id="result">Gradients: the result</h2>
+      <div class="result">
+        \[ \frac{\partial L}{\partial \hat{x}_i} = \frac{\partial L}{\partial y_i}\, \gamma_i \]
+        \[ \frac{\partial L}{\partial x_i} = \frac{1}{\sqrt{\sigma^2 + \epsilon}} \left( \frac{\partial L}{\partial \hat{x}_i} \;-\; \frac{1}{D} \sum_{j=1}^{D} \frac{\partial L}{\partial \hat{x}_j} \;-\; \hat{x}_i \cdot \frac{1}{D} \sum_{j=1}^{D} \frac{\partial L}{\partial \hat{x}_j}\, \hat{x}_j \right) \]
+        \[ \frac{\partial L}{\partial \gamma_i} = \sum_{\text{rows}} \frac{\partial L}{\partial y_i}\, \hat{x}_i \qquad\qquad \frac{\partial L}{\partial \beta_i} = \sum_{\text{rows}} \frac{\partial L}{\partial y_i} \]
+      </div>
+      <p>In words: take the gradient arriving at \(\hat{x}\), subtract its mean, subtract \(\hat{x}\) times the mean of (that gradient \(\times\, \hat{x}\)), and scale by \(1/\text{std}\).</p>
+
+      <!-- ============================================================ -->
+      <h2 id="derivation">Derivation</h2>
+      <p>Shorthand for this section, all within one row:</p>
+      \[ s = \sqrt{\sigma^2 + \epsilon} \qquad\qquad g_i = \frac{\partial L}{\partial \hat{x}_i} \]
+      <p>Two facts get used repeatedly. The deviations from the mean sum to zero, and \(\partial x_j / \partial x_i\) is the Kronecker delta:</p>
+      \[ \sum_{j} (x_j - \mu) = \sum_j x_j - D\mu = 0 \qquad\qquad \frac{\partial x_j}{\partial x_i} = \delta_{ij} = \begin{cases} 1 & i = j \\ 0 & i \ne j \end{cases} \]
+
+      <h3 id="gamma-beta">γ and β</h3>
+      <p>\(y_i = \gamma_i \hat{x}_i + \beta_i\) is element-wise, so \(\partial y_i / \partial \gamma_i = \hat{x}_i\) and \(\partial y_i / \partial \beta_i = 1\). \(\gamma\) and \(\beta\) are shared by every row (broadcast), so their gradients sum over rows.</p>
+
+      <h3 id="into-xhat">Into x̂</h3>
+      <p>Also element-wise: \(\partial y_i / \partial \hat{x}_i = \gamma_i\), so \(g_i = \dfrac{\partial L}{\partial y_i}\, \gamma_i\).</p>
+
+      <h3 id="through-xhat">Through x̂ to x</h3>
+      <p>This is the hard part, because \(x_i\) affects <em>every</em> \(\hat{x}_j\) in its row, through \(\mu\) and \(\sigma^2\). By the multivariable chain rule:</p>
+      \[ \frac{\partial L}{\partial x_i} = \sum_{j=1}^{D} g_j\, \frac{\partial \hat{x}_j}{\partial x_i} \]
+      <p>So we need \(\partial \hat{x}_j / \partial x_i\) for every pair \(i, j\). Build it up in pieces.</p>
+
+      <ol class="steps">
+        <li>
+          <p><strong>The mean.</strong> Only the \(j = i\) term of the sum contains \(x_i\):</p>
+          \[ \frac{\partial \mu}{\partial x_i} = \frac{1}{D} \qquad\Longrightarrow\qquad \frac{\partial (x_j - \mu)}{\partial x_i} = \delta_{ij} - \frac{1}{D} \]
+        </li>
+        <li>
+          <p><strong>The variance.</strong> Chain rule on each square, using step 1 for the inside:</p>
+          \[
+          \begin{aligned}
+          \frac{\partial \sigma^2}{\partial x_i}
+            &= \frac{1}{D} \sum_k 2(x_k - \mu) \left(\delta_{ki} - \frac{1}{D}\right) \\
+            &= \frac{2}{D} \left( (x_i - \mu) - \frac{1}{D} \sum_k (x_k - \mu) \right) \\
+            &= \frac{2}{D}\, (x_i - \mu)
+          \end{aligned}
+          \]
+          <p>The \(\delta_{ki}\) picks out the \(k = i\) term, and the remaining sum of deviations is 0.</p>
+        </li>
+        <li>
+          <p><strong>One over the standard deviation.</strong> \(1/s = (\sigma^2 + \epsilon)^{-1/2}\). Power rule, then chain rule with step 2:</p>
+          \[
+          \begin{aligned}
+          \frac{\partial}{\partial x_i}\, \frac{1}{s}
+            &= -\frac{1}{2} (\sigma^2 + \epsilon)^{-3/2} \cdot \frac{\partial \sigma^2}{\partial x_i} \\
+            &= -\frac{1}{2s^3} \cdot \frac{2}{D}\, (x_i - \mu) \\
+            &= -\frac{x_i - \mu}{D\, s^3}
+          \end{aligned}
+          \]
+        </li>
+        <li>
+          <p><strong>The normalised value.</strong> \(\hat{x}_j = (x_j - \mu) \cdot \frac{1}{s}\) is a product, so use the product rule with steps 1 and 3:</p>
+          \[
+          \begin{aligned}
+          \frac{\partial \hat{x}_j}{\partial x_i}
+            &= \frac{1}{s}\left(\delta_{ij} - \frac{1}{D}\right) + (x_j - \mu) \cdot \left(-\frac{x_i - \mu}{D\, s^3}\right) \\
+            &= \frac{1}{s} \left( \delta_{ij} - \frac{1}{D} - \frac{1}{D} \cdot \frac{x_j - \mu}{s} \cdot \frac{x_i - \mu}{s} \right) \\
+            &= \frac{1}{s} \left( \delta_{ij} - \frac{1}{D} - \frac{1}{D}\, \hat{x}_i\, \hat{x}_j \right)
+          \end{aligned}
+          \]
+          <p>Pulling \(1/s\) out leaves \(1/s^2\) in the last term, which is exactly what turns both deviations into \(\hat{x}\)s.</p>
+        </li>
+        <li>
+          <p><strong>Sum over \(j\).</strong> Substitute step 4 into the chain rule and split the sum into its three terms:</p>
+          \[
+          \begin{aligned}
+          \frac{\partial L}{\partial x_i}
+            &= \sum_j g_j \cdot \frac{1}{s} \left( \delta_{ij} - \frac{1}{D} - \frac{1}{D}\, \hat{x}_i\, \hat{x}_j \right) \\
+            &= \frac{1}{s} \left( \sum_j g_j\, \delta_{ij} \;-\; \frac{1}{D} \sum_j g_j \;-\; \hat{x}_i \cdot \frac{1}{D} \sum_j g_j\, \hat{x}_j \right) \\
+            &= \frac{1}{s} \left( g_i \;-\; \frac{1}{D} \sum_j g_j \;-\; \hat{x}_i \cdot \frac{1}{D} \sum_j g_j\, \hat{x}_j \right)
+          \end{aligned}
+          \]
+          <p>\(\hat{x}_i\) doesn't depend on \(j\), so it comes out of the third sum, and \(\delta_{ij}\) picks \(g_i\) out of the first. Putting back \(s = \sqrt{\sigma^2 + \epsilon}\) and \(g = \partial L / \partial \hat{x}\) gives <a href="#result">the result</a>.</p>
+        </li>
+      </ol>
+
+      <div class="note">
+        <p><strong>Why it gets messy by hand:</strong> the usual alternative is to backprop through the computation graph node by node (\(x \to \mu\), \(x \to \sigma^2\), \(\mu \to \sigma^2\), …), adding up the paths. It reaches the same answer, but the \(x \to \mu \to \sigma^2\) path and the direct \(x \to \sigma^2\) path have to be combined, and the cancellation from \(\sum_j (x_j - \mu) = 0\) is easy to miss. Going straight for \(\partial \hat{x}_j / \partial x_i\) keeps it to five steps.</p>
+      </div>
+
+      <!-- ============================================================ -->
+      <h2 id="sanity">Sanity checks</h2>
+      <p>The result is the incoming gradient with two components removed:</p>
+      <ul>
+        <li><strong>\(\sum_i \partial L / \partial x_i = 0\).</strong> Adding a constant to every \(x_i\) doesn't change \(\hat{x}\), so it can't change the loss: the gradient can have no component along \((1, 1, \dots, 1)\). That's the \(-\text{mean}(g)\) term. (Check: sum the bracket over \(i\), using \(\sum_i \hat{x}_i = 0\).)</li>
+        <li><strong>\(\sum_i \hat{x}_i\, \partial L / \partial x_i \approx 0\).</strong> Scaling the row's deviations up doesn't change \(\hat{x}\) either (exactly, when \(\epsilon = 0\)), so there's no component along \(\hat{x}\). That's the \(-\hat{x}\,\text{mean}(g \hat{x})\) term.</li>
+        <li>If every \(x_i\) in a row is equal, \(\hat{x} = 0\) and the gradient is \(\frac{1}{\sqrt{\epsilon}}\bigl(g_i - \text{mean}(g)\bigr)\): large, but finite, thanks to \(\epsilon\).</li>
+      </ul>
+
+      <!-- ============================================================ -->
+      <h2 id="code">In code</h2>
+<pre><code>def layernorm_forward(x, gamma, beta, eps=1e-5):
+    mean = x.mean(axis=1, keepdims=True)
+    x_centred = x - mean
+    var = (x_centred * x_centred).mean(axis=1, keepdims=True)
+    sd_inv = 1.0 / np.sqrt(var + eps)
+    x_hat = x_centred * sd_inv
+    return x_hat * gamma + beta, (x_hat, sd_inv, gamma)
+
+
+def layernorm_backward(dout, cache):
+    x_hat, sd_inv, gamma = cache
+    dx_hat = dout * gamma
+    mean_dx_hat = dx_hat.mean(axis=1, keepdims=True)
+    mean_dx_hat_x_hat = (dx_hat * x_hat).mean(axis=1, keepdims=True)
+    dx = sd_inv * (dx_hat - mean_dx_hat - x_hat * mean_dx_hat_x_hat)
+    dgamma = (dout * x_hat).sum(axis=0)
+    dbeta = dout.sum(axis=0)
+    return dx, dgamma, dbeta</code></pre>
+      <p>Statistics are over the row (<code>axis=1</code>, with <code>keepdims</code> so they broadcast back); parameter gradients sum over the rows (<code>axis=0</code>).</p>
+    </main>
+  </div>
+</body>
+</html>
