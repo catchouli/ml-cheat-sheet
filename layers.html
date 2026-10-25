@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Layers · ML Cheat Sheet</title>
   <link rel="stylesheet" href="style.css">
+  <script defer src="search.js"></script>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
   <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js" onload="renderMathInElement(document.body)"></script>
@@ -138,7 +139,7 @@
       <p><strong>Used for:</strong> the model's output (probabilities over classes or next tokens), and attention weights (how much each position attends to each other position).</p>
       <p><strong>Computing it:</strong> subtract the row's maximum first, \(p_i = e^{z_i - m} / \sum_k e^{z_k - m}\), so \(e^x\) can't overflow.</p>
 
-      <h4>Jacobian</h4>
+      <h4 id="softmax-jacobian">Jacobian</h4>
       <p>Every output depends on every input, through the sum:</p>
       <div class="result">
         \[ \frac{\partial p_i}{\partial z_j} = p_i\,(\delta_{ij} - p_j) = \begin{cases} p_i(1 - p_i) & i = j \\ -p_i\,p_j & i \ne j \end{cases} \]
@@ -150,7 +151,7 @@
         \[ i \ne j: \quad \frac{0 \cdot S - e^{z_i} e^{z_j}}{S^2} = -\frac{e^{z_i}}{S}\cdot\frac{e^{z_j}}{S} = -p_i\,p_j \]
       </div>
 
-      <h4>Backward pass</h4>
+      <h4 id="softmax-backward">Backward pass</h4>
       <div class="result">
         \[ \frac{\partial L}{\partial z_j} = p_j \left( \frac{\partial L}{\partial p_j} - \sum_i \frac{\partial L}{\partial p_i}\, p_i \right) \]
       </div>

@@ -23,6 +23,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/configure-pages@v5
+      - run: python3 build_search.py
       - uses: actions/upload-pages-artifact@v3
         with:
           path: .

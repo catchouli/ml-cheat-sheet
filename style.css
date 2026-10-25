@@ -279,3 +279,60 @@ pre {
   line-height: 1.5;
 }
 pre code { background: none; padding: 0; }
+
+/* ---- Search ---- */
+
+.site-header nav { position: relative; }
+.search { flex: 0 1 12rem; }
+
+.search input {
+  width: 100%;
+  font: inherit;
+  font-size: 0.92rem;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.25rem 0.6rem;
+}
+
+.search input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+
+.search-results {
+  position: absolute;
+  top: calc(100% - 0.25rem);
+  right: 16px;
+  z-index: 10;
+  width: min(32rem, calc(100vw - 32px));
+  max-height: 70vh;
+  overflow-y: auto;
+  list-style: none;
+  margin: 0;
+  padding: 0.25rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.15);
+}
+
+.search-results a {
+  display: block;
+  padding: 0.5rem 0.75rem;
+  border-radius: 6px;
+  color: var(--text);
+}
+
+.search-results a:hover, .search-results a.active { background: var(--accent-soft); }
+.search-path { display: block; font-size: 0.85rem; color: var(--muted); }
+.search-path strong { color: var(--text); }
+.search-snippet { display: block; font-size: 0.88rem; color: var(--muted); line-height: 1.45; margin-top: 0.15rem; }
+.search-results mark { background: none; color: var(--accent); font-weight: 600; }
+.search-message { padding: 0.5rem 0.75rem; color: var(--muted); font-size: 0.92rem; }
+
+@media (max-width: 40rem) {
+  .search { flex-basis: 100%; }
+}
+
+/* Briefly mark the heading a link jumped to. */
+:target { animation: target-flash 1.5s ease-out; }
+@keyframes target-flash { from { background: var(--accent-soft); } to { background: transparent; } }

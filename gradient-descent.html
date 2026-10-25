@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Gradient descent · ML Cheat Sheet</title>
   <link rel="stylesheet" href="style.css">
+  <script defer src="search.js"></script>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
   <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js" onload="renderMathInElement(document.body)"></script>
@@ -215,11 +216,11 @@
       <h2 id="optimizers">Beyond plain SGD</h2>
       <p>The optimizer decides how to turn the gradient \(g_t = \nabla_\theta L\) at step \(t\) into an update. Everything is element-wise.</p>
 
-      <h4>Momentum</h4>
+      <h4 id="momentum">Momentum</h4>
       <p>Keep a running average of past gradients, so steps build up speed in consistent directions and noise cancels out.</p>
       \[ v_t = \mu\, v_{t-1} + g_t \qquad \theta_t = \theta_{t-1} - \eta\, v_t \qquad (\mu \approx 0.9) \]
 
-      <h4>Adam</h4>
+      <h4 id="adam">Adam</h4>
       <p>Momentum, plus a per-parameter step size: divide by a running average of the squared gradient, so parameters with large or noisy gradients take smaller steps.</p>
       \[
       \begin{aligned}
@@ -231,7 +232,7 @@
       \]
       <p>Typical values: \(\beta_1 = 0.9\), \(\beta_2 = 0.999\) (often 0.95 for transformers), \(\epsilon = 10^{-8}\).</p>
 
-      <h4>AdamW</h4>
+      <h4 id="adamw">AdamW</h4>
       <p>Adam with <strong>decoupled weight decay</strong>: shrink the weights directly, rather than adding \(\lambda\theta\) to the gradient (where Adam's scaling would distort it).</p>
       \[ \theta_t = \theta_{t-1} - \eta \left( \frac{\hat{m}_t}{\sqrt{\hat{v}_t} + \epsilon} + \lambda\, \theta_{t-1} \right) \]
       <p>Weight decay is usually applied to weight matrices only, not to biases or norm parameters (\(\gamma, \beta\)).</p>

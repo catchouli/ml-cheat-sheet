@@ -29,6 +29,8 @@ It goes from plain maths, to how neural networks learn, to transformers:
 
 ## How it works
 
-It's plain HTML and CSS, with formulas written in LaTeX and rendered in the browser by [KaTeX](https://katex.org/), so there's no build step. Pushing to `main` deploys it to GitHub Pages.
+It's plain HTML and CSS, with formulas written in LaTeX and rendered in the browser by [KaTeX](https://katex.org/). Pushing to `main` deploys it to GitHub Pages.
+
+Search runs in the browser too. `build_search.py` reads every page and writes `search-index.js`, which has the text of each section and the headings it sits under, and the search box looks through that in memory and links straight to the heading. Press `/` to jump to it. The deploy rebuilds the index, so it's only worth running yourself to try search locally.
 
 To read it locally, open `index.html`, or serve the folder with `python3 -m http.server`.
