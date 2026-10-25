@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GPT model · ML Cheat Sheet</title>
+  <link rel="stylesheet" href="style.css">
+  <script defer src="search.js"></script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js" onload="renderMathInElement(document.body)"></script>
+</head>
+<body>
+  <header class="site-header">
+    <nav>
+      <a class="home" href="index.html">ML Cheat Sheet</a>
+      <a href="math.html">Math</a>
+      <a href="gradient-descent.html">Gradient descent</a>
+      <a href="layers.html">Layers</a>
+      <a href="layernorm.html">LayerNorm</a>
+      <a href="residual-stream.html">Residual stream</a>
+      <a href="attention.html">Attention</a>
+      <a href="positions.html">Positions</a>
+      <a href="gpt.html" aria-current="page">GPT model</a>
+    </nav>
+  </header>
+
+  <div class="page with-toc">
+    <nav class="toc" aria-label="On this page">
+      <h2>On this page</h2>
+      <ol>
+        <li><a href="#shapes">Shapes, end to end</a>
+          <ol>
+            <li><a href="#targets">Every position is an example</a></li>
+          </ol>
+        </li>
+        <li><a href="#embeddings">Embeddings</a></li>
+        <li><a href="#tying">Weight tying</a></li>
+        <li><a href="#init">Initialisation</a>
+          <ol>
+            <li><a href="#init-loss">Why the loss starts at ln V</a></li>
+            <li><a href="#init-tied">N(0, 1) with tied weights</a></li>
+            <li><a href="#init-once">Initialising a shared matrix</a></li>
+          </ol>
+        </li>
+        <li><a href="#params">Counting parameters</a></li>
+        <li><a href="#debugging">Debugging habits</a></li>
+        <li><a href="#gotchas">PyTorch gotchas</a></li>
+      </ol>
+    </nav>
+
+    <main>
+      <h1>GPT model</h1>
+      <p class="lede">The whole decoder-only transformer, from token ids to next-token scores, and how to tell whether it's built right before training it. The block itself is on the <a href="residual-stream.html">Residual stream</a> page.</p>
+
+      <!-- ============================================================ -->
+      <h2 id="shapes">Shapes, end to end</h2>
+      <p>\(B\) sequences of \(T\) tokens, model width \(C\), vocabulary size \(V\), \(N\) blocks.</p>
+      <div class="table-wrap">
+        <table class="formulas">
+          <tr><th>Step</th><th>Computes</th><th>Shape</th></tr>
+          <tr><td>Token ids</td><td class="math-cell">\(\text{idx}\), integers in \([0, V)\)</td><td>\((B, T)\)</td></tr>
+          <tr><td>Token embeddings</td><td class="math-cell">\(W_E[\text{idx}]\)</td><td>\((B, T, C)\)</td></tr>
+          <tr><td>Position embeddings</td><td class="math-cell">\(W_P[0..T{-}1]\), broadcast over \(B\)</td><td>\((T, C)\)</td></tr>
+          <tr><td>Residual stream</td><td class="math-cell">\(x = W_E[\text{idx}] + W_P[0..T{-}1]\)</td><td>\((B, T, C)\)</td></tr>
+          <tr><td>Blocks</td><td class="math-cell">\(x \leftarrow \operatorname{Block}_l(x)\), \(l = 1..N\)</td><td>\((B, T, C)\)</td></tr>
+          <tr><td>Final LayerNorm</td><td class="math-cell">\(\hat{x} = \operatorname{LN}_f(x)\)</td><td>\((B, T, C)\)</td></tr>
+          <tr><td>Logits (tied head)</td><td class="math-cell">\(\hat{x}\, W_E^\top\)</td><td>\((B, T, V)\)</td></tr>
+        </table>
+      </div>
+
+      <h3 id="targets">Every position is an example</h3>
+      <p>The targets are the inputs shifted left by one: position \(t\) predicts token \(t + 1\). Thanks to the causal mask, position \(t\) only sees tokens \(0..t\), so one forward pass trains \(T\) predictions per sequence at once:</p>
+      <div class="result">
+        \[ L = -\frac{1}{BT} \sum_{b=1}^{B} \sum_{t=1}^{T} \log \operatorname{softmax}(\text{logits}_{b,t})_{y_{b,t}} \qquad y_{b,t} = \text{idx}_{b,t+1} \]
+      </div>
+      <p>In PyTorch, flatten to \((BT, V)\) and \((BT)\) for <code>F.cross_entropy</code>. Use <code>reshape</code> for the targets: <a href="#gotchas">see below</a>.</p>
+
+      <!-- ============================================================ -->
+      <h2 id="embeddings">Embeddings</h2>
+      <p>An embedding is a lookup table: token \(i\) gets row \(i\) of \(W_E\) (\(V \times C\)). That's the same as multiplying a one-hot vector by the matrix, \(\operatorname{onehot}(i)\, W_E = W_E[i]\), without building the one-hot.</p>
+      <p><strong>Gradient:</strong> row \(i\) gets the sum of \(\partial L / \partial x\) over every position where token \(i\) appears. Rows for tokens not in the batch get nothing from the lookup (but see <a href="#tying">tying</a>, which changes that).</p>
+      <p><strong>Learned positions</strong> work the same way: \(W_P\) is a \(\text{block\_size} \times C\) table and position \(t\) gets row \(t\). There's no row past \(\text{block\_size} - 1\), so that's a hard limit on context length. Other ways of encoding position are on the <a href="positions.html">Positions</a> page.</p>
+
+      <!-- ============================================================ -->
+      <h2 id="tying">Weight tying</h2>
+      <p>The output layer reuses the token embedding matrix: the logit for token \(v\) is the dot product of the final stream with that token's embedding.</p>
+      <div class="result">
+        \[ \text{logit}_v = \hat{x} \cdot W_E[v] \qquad\Longleftrightarrow\qquad \text{logits} = \hat{x}\, W_E^\top \]
+      </div>
+      <ul>
+        <li><strong>Why:</strong> reading a token into the stream and scoring the stream against tokens are closely related jobs, so tokens with similar embeddings get similar scores. Press &amp; Wolf (2017) found it trains as well or better with fewer parameters.</li>
+        <li><strong>Parameters saved:</strong> \(VC\). For GPT-2 small that's 38.6M of 124.4M (31%). For a character model with \(V = 65\) it's under 0.3%, so it barely matters there.</li>
+        <li><strong>Gradient:</strong> the matrix is used twice, so it gets the sum of both gradients. The output side gives <em>every</em> row a gradient on every step, because every token gets some probability in the softmax.</li>
+        <li><strong>In PyTorch:</strong> <code>lm_head.weight = tok_emb.weight</code> makes both modules hold the same <code>Parameter</code>. <code>model.parameters()</code> lists it once, so the optimizer updates it once.</li>
+      </ul>
+
+      <!-- ============================================================ -->
+      <h2 id="init">Initialisation</h2>
+      <p>The aim is for the untrained model to be <strong>uniformly unsure</strong>: every logit about the same, so the first loss is about \(\ln V\). Starting confidently wrong wastes the first part of training undoing it. GPT-2's recipe:</p>
+      <div class="table-wrap">
+        <table class="formulas">
+          <tr><th>Parameters</th><th>Init</th></tr>
+          <tr><td>Linear weights, token and position embeddings</td><td class="math-cell">\(\mathcal{N}(0,\ 0.02^2)\)</td></tr>
+          <tr><td>Biases</td><td class="math-cell">\(0\)</td></tr>
+          <tr><td>LayerNorm \(\gamma, \beta\)</td><td class="math-cell">\(1, 0\)</td></tr>
+          <tr><td>Output projections into the stream (attention's \(W_O\), the MLP's \(W_2\))</td><td class="math-cell">\(\mathcal{N}\bigl(0,\ (0.02/\sqrt{2N})^2\bigr)\)</td></tr>
+        </table>
+      </div>
+      <p>The last row is so the stream doesn't grow with depth: see <a href="residual-stream.html#scale">Keeping the scale in check</a>. PyTorch's defaults are different: <code>nn.Embedding</code> starts at \(\mathcal{N}(0, 1)\), and <code>nn.Linear</code> at \(U(-1/\sqrt{\text{fan\_in}},\ 1/\sqrt{\text{fan\_in}})\).</p>
+
+      <h3 id="init-loss">Why the loss starts at ln V</h3>
+      <p>If every logit is equal, the softmax is uniform, \(p_y = 1/V\), and \(L = -\log(1/V) = \ln V\). With small random logits of spread \(s\), the loss is a little higher:</p>
+      <div class="result">
+        \[ \mathbb{E}[L] \approx \ln V + \tfrac{1}{2}s^2 \]
+      </div>
+      <div class="example">
+        <span class="label">Derivation</span>
+        <p>\(L = \log \sum_v e^{z_v} - z_y\). The target's logit averages 0. For large \(V\) the sum is close to \(V\, \mathbb{E}[e^z]\), and for \(z \sim \mathcal{N}(0, s^2)\), \(\mathbb{E}[e^z] = e^{s^2/2}\). So \(\mathbb{E}[L] \approx \ln V + s^2/2\).</p>
+        <p>Measured on a 6-layer, \(C = 384\) character model (\(V = 65\)) with GPT-2 init: \(s = 0.42\), so the estimate is \(4.174 + 0.087 = 4.261\); the actual loss was \(4.259\).</p>
+      </div>
+
+      <h3 id="init-tied">N(0, 1) with tied weights</h3>
+      <p>With PyTorch's default embedding init and a tied head, the model starts out predicting that <strong>each token repeats itself</strong>, almost always wrongly:</p>
+      <ul>
+        <li>The stream starts as \(e_i + p_t\) (the token's embedding plus a position embedding), two random vectors of length about \(\sqrt{C}\).</li>
+        <li>The final LayerNorm rescales it to length \(\sqrt{C}\) but keeps its direction, about \(45°\) from \(e_i\).</li>
+        <li>The logit for token \(i\) itself is then \(e_i \cdot \hat{x} \approx \sqrt{C} \cdot \sqrt{C} \cdot \cos 45° = C / \sqrt{2}\), far above every other logit.</li>
+      </ul>
+      <div class="example">
+        <span class="label">Measured</span>
+        <p>2 blocks, \(V = 50\), \(\ln V = 3.91\). At \(C = 32\): the input token's logit averaged \(21\) (\(C/\sqrt{2} = 22.6\)), the model's top prediction was the input token 92% of the time, and the loss was \(21\). At \(C = 384\) the loss was \(257\).</p>
+      </div>
+
+      <h3 id="init-once">Initialising a shared matrix</h3>
+      <p>Looping over <code>self.modules()</code> visits the tied matrix twice: once as the <code>nn.Embedding</code> and once as <code>lm_head</code>'s <code>nn.Linear</code>. Whichever comes later wins, without any error. With one rule for both, as in GPT-2, it doesn't matter. If the rules ever differ, skip the head so the matrix is clearly initialised as an embedding:</p>
+<pre><code>for m in self.modules():
+    if m is self.lm_head:
+        continue  # its weight is tok_emb's
+    if isinstance(m, nn.Linear):
+        ...</code></pre>
+
+      <!-- ============================================================ -->
+      <h2 id="params">Counting parameters</h2>
+      <p>Per block, with biases, a \(4C\) MLP and two LayerNorms:</p>
+      <div class="table-wrap">
+        <table class="formulas">
+          <tr><th>Part</th><th>Weights</th><th>Biases</th></tr>
+          <tr><td>Attention \(Q, K, V\)</td><td class="math-cell">\(3C^2\)</td><td class="math-cell">\(3C\)</td></tr>
+          <tr><td>Attention output \(W_O\)</td><td class="math-cell">\(C^2\)</td><td class="math-cell">\(C\)</td></tr>
+          <tr><td>MLP \(W_1\) (\(C \to 4C\))</td><td class="math-cell">\(4C^2\)</td><td class="math-cell">\(4C\)</td></tr>
+          <tr><td>MLP \(W_2\) (\(4C \to C\))</td><td class="math-cell">\(4C^2\)</td><td class="math-cell">\(C\)</td></tr>
+          <tr><td>Two LayerNorms</td><td class="math-cell"></td><td class="math-cell">\(4C\)</td></tr>
+        </table>
+      </div>
+      <div class="result">
+        \[ \text{params} = N\,(12C^2 + 13C) + VC + \text{block\_size} \cdot C + 2C \]
+      </div>
+      <p>That's the blocks, the token embeddings (shared with the head), the position embeddings, and the final LayerNorm. Roughly \(12NC^2\) once \(C\) is large: most of a big model is its blocks.</p>
+      <div class="example">
+        <span class="label">Checks</span>
+        <p>GPT-2 small (\(N = 12\), \(C = 768\), \(V = 50257\), block size 1024): \(124{,}439{,}808\), which matches the released model exactly.</p>
+        <p>\(N = 6\), \(C = 384\), \(V = 65\), block size 256: \(10{,}770{,}816\).</p>
+      </div>
+
+      <!-- ============================================================ -->
+      <h2 id="debugging">Debugging habits</h2>
+      <p>Three quick checks that catch most bugs before a long training run does:</p>
+      <div class="table-wrap">
+        <table class="formulas">
+          <tr><th>Check</th><th>How</th><th>What a bug looks like</th></tr>
+          <tr><td>Initial loss</td><td>Compare the untrained loss with \(\ln V\).</td><td>Far above: initialisation too large (see <a href="#init-tied">above</a>).</td></tr>
+          <tr><td>Causality</td><td>Change the token at position \(t\). Logits before \(t\) must not change at all.</td><td>A leaky mask: a suspiciously low training loss, and garbage when generating.</td></tr>
+          <tr><td>Overfit one batch</td><td>Train on one small batch for a few hundred steps. The loss should go to almost 0.</td><td>If it can't memorise one batch, something is broken, and more data won't fix it.</td></tr>
+        </table>
+      </div>
+      <p>Counting parameters against the formula above is a fourth: a wrong count means a missing or extra layer, or tying that didn't take.</p>
+
+      <!-- ============================================================ -->
+      <h2 id="gotchas">PyTorch gotchas</h2>
+      <h4 id="view-reshape"><code>view</code> vs <code>reshape</code></h4>
+      <p>A tensor is a block of memory plus a <strong>shape</strong> and <strong>strides</strong> (how many elements to step for each dimension). <code>view</code> only changes the shape and strides, never the memory, so it fails when no single stride can walk the elements in the new order. <code>reshape</code> returns a view when it can and copies when it can't.</p>
+      <div class="example">
+        <span class="label">Example</span>
+        <p><code>idx</code> is \((2, 16)\) with strides \((16, 1)\). Then <code>y = idx[:, 1:]</code> is \((2, 15)\) but keeps strides \((16, 1)\): each row's elements sit side by side, but there's a one-element gap between rows. <code>y.view(-1)</code> raises an error; <code>y.reshape(-1)</code> copies.</p>
+      </div>
+      <h4 id="modulelist"><code>nn.ModuleList</code> isn't callable</h4>
+      <p>It's a container that registers its modules' parameters, with no <code>forward</code>. Loop over it: <code>for block in self.blocks: x = block(x)</code>. <code>nn.Sequential</code> is the callable version, but a loop is what you need once each block takes extra arguments, like a KV cache.</p>
+    </main>
+  </div>
+  <footer class="site-footer">
+    <a href="https://github.com/catchouli/ml-cheat-sheet">Source on GitHub</a>
+  </footer>
+</body>
+</html>

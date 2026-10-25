@@ -336,3 +336,13 @@ pre code { background: none; padding: 0; }
 /* Briefly mark the heading a link jumped to. */
 :target { animation: target-flash 1.5s ease-out; }
 @keyframes target-flash { from { background: var(--accent-soft); } to { background: transparent; } }
+
+/* ---- Footer ---- */
+
+.site-footer {
+  border-top: 1px solid var(--border);
+  padding: 1.25rem 16px 2rem;
+  text-align: center;
+  font-size: 0.9rem;
+  color: var(--muted);
+}

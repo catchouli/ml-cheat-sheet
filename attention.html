@@ -21,6 +21,7 @@
       <a href="residual-stream.html">Residual stream</a>
       <a href="attention.html" aria-current="page">Attention</a>
       <a href="positions.html">Positions</a>
+      <a href="gpt.html">GPT model</a>
     </nav>
   </header>
 
@@ -168,5 +169,8 @@
       <p>The \(T^2\) is why context length is expensive. Fused kernels like FlashAttention (behind <code>F.scaled_dot_product_attention</code>) compute the same result in tiles, without ever storing the full \(T \times T\) matrix. During generation, a KV cache stores past keys and values so each new token costs \(O(Td)\) rather than recomputing everything.</p>
     </main>
   </div>
+  <footer class="site-footer">
+    <a href="https://github.com/catchouli/ml-cheat-sheet">Source on GitHub</a>
+  </footer>
 </body>
 </html>

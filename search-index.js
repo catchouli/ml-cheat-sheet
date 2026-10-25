@@ -759,5 +759,135 @@ window.SEARCH_INDEX = [
 ],
 "text": "Sinusoidal Added to input None No Defined, works poorly Original Transformer Learned Added to input \\(T_{\\max} \\times C\\) No No BERT, GPT-2, GPT-3 T5 bias Attention scores Per head, per bucket Yes Somewhat T5 ALiBi Attention scores None Yes Well BLOOM, MPT RoPE Rotates \\(q\\), \\(k\\) in every layer None Yes With scaling LLaMA, Mistral, Qwen, Gemma",
 "math": "max times"
+},
+{
+"url": "gpt.html",
+"page": "GPT model",
+"path": [],
+"text": "The whole decoder-only transformer, from token ids to next-token scores, and how to tell whether it's built right before training it. The block itself is on the Residual stream page.",
+"math": ""
+},
+{
+"url": "gpt.html#shapes",
+"page": "GPT model",
+"path": [
+"Shapes, end to end"
+],
+"text": "\\(B\\) sequences of \\(T\\) tokens, model width \\(C\\), vocabulary size \\(V\\), \\(N\\) blocks. Token ids \\(\\text{idx}\\), integers in \\([0, V)\\) \\((B, T)\\) Token embeddings \\(W_E[\\text{idx}]\\) \\((B, T, C)\\) Position embeddings \\(W_P[0..T{-}1]\\), broadcast over \\(B\\) \\((T, C)\\) Residual stream \\(x = W_E[\\text{idx}] + W_P[0..T{-}1]\\) \\((B, T, C)\\) Blocks \\(x \\leftarrow \\operatorname{Block}_l(x)\\), \\(l = 1..N\\) \\((B, T, C)\\) Final LayerNorm \\(\\hat{x} = \\operatorname{LN}_f(x)\\) \\((B, T, C)\\) Logits (tied head) \\(\\hat{x}\\, W_E^\\top\\) \\((B, T, V)\\)",
+"math": "idx Block LN leftarrow top"
+},
+{
+"url": "gpt.html#targets",
+"page": "GPT model",
+"path": [
+"Shapes, end to end",
+"Every position is an example"
+],
+"text": "The targets are the inputs shifted left by one: position \\(t\\) predicts token \\(t + 1\\). Thanks to the causal mask, position \\(t\\) only sees tokens \\(0..t\\), so one forward pass trains \\(T\\) predictions per sequence at once: In PyTorch, flatten to \\((BT, V)\\) and \\((BT)\\) for F.cross_entropy. Use reshape for the targets: see below.",
+"math": "softmax logits idx sum log"
+},
+{
+"url": "gpt.html#embeddings",
+"page": "GPT model",
+"path": [
+"Embeddings"
+],
+"text": "An embedding is a lookup table: token \\(i\\) gets row \\(i\\) of \\(W_E\\) (\\(V \\times C\\)). That's the same as multiplying a one-hot vector by the matrix, \\(\\operatorname{onehot}(i)\\, W_E = W_E[i]\\), without building the one-hot. Gradient: row \\(i\\) gets the sum of \\(\\partial L / \\partial x\\) over every position where token \\(i\\) appears. Rows for tokens not in the batch get nothing from the lookup (but see tying, which changes that). Learned positions work the same way: \\(W_P\\) is a \\(\\text{block\\_size} \\times C\\) table and position \\(t\\) gets row \\(t\\). There's no row past \\(\\text{block\\_size} - 1\\), so that's a hard limit on context length. Other ways of encoding position are on the Positions page.",
+"math": "onehot block\\_size times partial"
+},
+{
+"url": "gpt.html#tying",
+"page": "GPT model",
+"path": [
+"Weight tying"
+],
+"text": "The output layer reuses the token embedding matrix: the logit for token \\(v\\) is the dot product of the final stream with that token's embedding. Why: reading a token into the stream and scoring the stream against tokens are closely related jobs, so tokens with similar embeddings get similar scores. Press & Wolf (2017) found it trains as well or better with fewer parameters. Parameters saved: \\(VC\\). For GPT-2 small that's 38.6M of 124.4M (31%). For a character model with \\(V = 65\\) it's under 0.3%, so it barely matters there. Gradient: the matrix is used twice, so it gets the sum of both gradients. The output side gives every row a gradient on every step, because every token gets some probability in the softmax. In PyTorch: lm_head.weight = tok_emb.weight makes both modules hold the same Parameter. model.parameters() lists it once, so the optimizer updates it once.",
+"math": "logit logits Longleftrightarrow top"
+},
+{
+"url": "gpt.html#init",
+"page": "GPT model",
+"path": [
+"Initialisation"
+],
+"text": "The aim is for the untrained model to be uniformly unsure: every logit about the same, so the first loss is about \\(\\ln V\\). Starting confidently wrong wastes the first part of training undoing it. GPT-2's recipe: Linear weights, token and position embeddings \\(\\mathcal{N}(0,\\ 0.02^2)\\) Biases \\(0\\) LayerNorm \\(\\gamma, \\beta\\) \\(1, 0\\) Output projections into the stream (attention's \\(W_O\\), the MLP's \\(W_2\\)) \\(\\mathcal{N}\\bigl(0,\\ (0.02/\\sqrt{2N})^2\\bigr)\\) The last row is so the stream doesn't grow with depth: see Keeping the scale in check. PyTorch's defaults are different: nn.Embedding starts at \\(\\mathcal{N}(0, 1)\\), and nn.Linear at \\(U(-1/\\sqrt{\\text{fan\\_in}},\\ 1/\\sqrt{\\text{fan\\_in}})\\).",
+"math": "fan\\_in gamma beta bigl sqrt bigr"
+},
+{
+"url": "gpt.html#init-loss",
+"page": "GPT model",
+"path": [
+"Initialisation",
+"Why the loss starts at ln V"
+],
+"text": "If every logit is equal, the softmax is uniform, \\(p_y = 1/V\\), and \\(L = -\\log(1/V) = \\ln V\\). With small random logits of spread \\(s\\), the loss is a little higher: \\(L = \\log \\sum_v e^{z_v} - z_y\\). The target's logit averages 0. For large \\(V\\) the sum is close to \\(V\\, \\mathbb{E}[e^z]\\), and for \\(z \\sim \\mathcal{N}(0, s^2)\\), \\(\\mathbb{E}[e^z] = e^{s^2/2}\\). So \\(\\mathbb{E}[L] \\approx \\ln V + s^2/2\\). Measured on a 6-layer, \\(C = 384\\) character model (\\(V = 65\\)) with GPT-2 init: \\(s = 0.42\\), so the estimate is \\(4.174 + 0.087 = 4.261\\); the actual loss was \\(4.259\\).",
+"math": "approx log sum sim"
+},
+{
+"url": "gpt.html#init-tied",
+"page": "GPT model",
+"path": [
+"Initialisation",
+"N(0, 1) with tied weights"
+],
+"text": "With PyTorch's default embedding init and a tied head, the model starts out predicting that each token repeats itself, almost always wrongly: The stream starts as \\(e_i + p_t\\) (the token's embedding plus a position embedding), two random vectors of length about \\(\\sqrt{C}\\). The final LayerNorm rescales it to length \\(\\sqrt{C}\\) but keeps its direction, about \\(45°\\) from \\(e_i\\). The logit for token \\(i\\) itself is then \\(e_i \\cdot \\hat{x} \\approx \\sqrt{C} \\cdot \\sqrt{C} \\cdot \\cos 45° = C / \\sqrt{2}\\), far above every other logit. 2 blocks, \\(V = 50\\), \\(\\ln V = 3.91\\). At \\(C = 32\\): the input token's logit averaged \\(21\\) (\\(C/\\sqrt{2} = 22.6\\)), the model's top prediction was the input token 92% of the time, and the loss was \\(21\\). At \\(C = 384\\) the loss was \\(257\\).",
+"math": "sqrt approx cos"
+},
+{
+"url": "gpt.html#init-once",
+"page": "GPT model",
+"path": [
+"Initialisation",
+"Initialising a shared matrix"
+],
+"text": "Looping over self.modules() visits the tied matrix twice: once as the nn.Embedding and once as lm_head's nn.Linear. Whichever comes later wins, without any error. With one rule for both, as in GPT-2, it doesn't matter. If the rules ever differ, skip the head so the matrix is clearly initialised as an embedding: for m in self.modules(): if m is self.lm_head: continue # its weight is tok_emb's if isinstance(m, nn.Linear): ...",
+"math": ""
+},
+{
+"url": "gpt.html#params",
+"page": "GPT model",
+"path": [
+"Counting parameters"
+],
+"text": "Per block, with biases, a \\(4C\\) MLP and two LayerNorms: Attention \\(Q, K, V\\) \\(3C^2\\) \\(3C\\) Attention output \\(W_O\\) \\(C^2\\) \\(C\\) MLP \\(W_1\\) (\\(C \\to 4C\\)) \\(4C^2\\) \\(4C\\) MLP \\(W_2\\) (\\(4C \\to C\\)) \\(4C^2\\) \\(C\\) Two LayerNorms \\(4C\\) That's the blocks, the token embeddings (shared with the head), the position embeddings, and the final LayerNorm. Roughly \\(12NC^2\\) once \\(C\\) is large: most of a big model is its blocks. GPT-2 small (\\(N = 12\\), \\(C = 768\\), \\(V = 50257\\), block size 1024): \\(124{,}439{,}808\\), which matches the released model exactly. \\(N = 6\\), \\(C = 384\\), \\(V = 65\\), block size 256: \\(10{,}770{,}816\\).",
+"math": "params block\\_size"
+},
+{
+"url": "gpt.html#debugging",
+"page": "GPT model",
+"path": [
+"Debugging habits"
+],
+"text": "Three quick checks that catch most bugs before a long training run does: Initial loss Compare the untrained loss with \\(\\ln V\\). Far above: initialisation too large (see above). Causality Change the token at position \\(t\\). Logits before \\(t\\) must not change at all. A leaky mask: a suspiciously low training loss, and garbage when generating. Overfit one batch Train on one small batch for a few hundred steps. The loss should go to almost 0. If it can't memorise one batch, something is broken, and more data won't fix it. Counting parameters against the formula above is a fourth: a wrong count means a missing or extra layer, or tying that didn't take.",
+"math": ""
+},
+{
+"url": "gpt.html#gotchas",
+"page": "GPT model",
+"path": [
+"PyTorch gotchas"
+],
+"text": "",
+"math": ""
+},
+{
+"url": "gpt.html#view-reshape",
+"page": "GPT model",
+"path": [
+"PyTorch gotchas",
+"view vs reshape"
+],
+"text": "A tensor is a block of memory plus a shape and strides (how many elements to step for each dimension). view only changes the shape and strides, never the memory, so it fails when no single stride can walk the elements in the new order. reshape returns a view when it can and copies when it can't. idx is \\((2, 16)\\) with strides \\((16, 1)\\). Then y = idx[:, 1:] is \\((2, 15)\\) but keeps strides \\((16, 1)\\): each row's elements sit side by side, but there's a one-element gap between rows. y.view(-1) raises an error; y.reshape(-1) copies.",
+"math": ""
+},
+{
+"url": "gpt.html#modulelist",
+"page": "GPT model",
+"path": [
+"PyTorch gotchas",
+"nn.ModuleList isn't callable"
+],
+"text": "It's a container that registers its modules' parameters, with no forward. Loop over it: for block in self.blocks: x = block(x). nn.Sequential is the callable version, but a loop is what you need once each block takes extra arguments, like a KV cache.",
+"math": ""
 }
 ];
