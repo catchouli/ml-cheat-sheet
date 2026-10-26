@@ -29,6 +29,8 @@ It goes from plain maths, to how neural networks learn, to transformers:
 
 **GPT model** puts it all together: the shapes from token ids to logits, embeddings and weight tying, why GPT-2 initialises with a standard deviation of 0.02 (and what happens with PyTorch's defaults and tied weights), counting parameters, and the checks worth running before training anything.
 
+**Training** is the recipe: AdamW with weight decay on the right parameters, warmup and cosine decay, gradient clipping, and how to read loss curves, using two of my own runs to show the difference the schedule makes.
+
 ## How it works
 
 It's plain HTML and CSS, with formulas written in LaTeX and rendered in the browser by [KaTeX](https://katex.org/). Pushing to `main` deploys it to GitHub Pages.

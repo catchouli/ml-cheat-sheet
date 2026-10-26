@@ -1,0 +1,297 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Training · ML Cheat Sheet</title>
+  <link rel="stylesheet" href="style.css">
+  <script defer src="menu.js"></script>
+  <script defer src="search.js"></script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js" onload="renderMathInElement(document.body)"></script>
+</head>
+<body>
+  <header class="site-header">
+    <nav>
+      <a class="home" href="index.html">ML Cheat Sheet</a>
+      <details class="menu">
+        <summary>Maths</summary>
+        <ul>
+          <li><a href="math.html">Math</a></li>
+        </ul>
+      </details>
+      <details class="menu">
+        <summary>Neural networks</summary>
+        <ul>
+          <li><a href="gradient-descent.html">Gradient descent</a></li>
+          <li><a href="layers.html">Layers</a></li>
+          <li><a href="layernorm.html">LayerNorm</a></li>
+        </ul>
+      </details>
+      <details class="menu current">
+        <summary>Transformers</summary>
+        <ul>
+          <li><a href="residual-stream.html">Residual stream</a></li>
+          <li><a href="attention.html">Attention</a></li>
+          <li><a href="positions.html">Positions</a></li>
+          <li><a href="gpt.html">GPT model</a></li>
+          <li><a href="training.html" aria-current="page">Training</a></li>
+        </ul>
+      </details>
+    </nav>
+  </header>
+
+  <div class="page with-toc">
+    <nav class="toc" aria-label="On this page">
+      <h2>On this page</h2>
+      <ol>
+        <li><a href="#recipe">The recipe</a></li>
+        <li><a href="#adamw">AdamW and parameter groups</a>
+          <ol>
+            <li><a href="#weight-decay">Weight decay</a></li>
+            <li><a href="#groups">What to decay</a></li>
+            <li><a href="#beta2">Why β₂ = 0.95</a></li>
+          </ol>
+        </li>
+        <li><a href="#schedule">Learning-rate schedule</a>
+          <ol>
+            <li><a href="#warmup">Why warm up</a></li>
+            <li><a href="#decay">Why decay</a></li>
+          </ol>
+        </li>
+        <li><a href="#clipping">Gradient clipping</a></li>
+        <li><a href="#curves">Reading loss curves</a>
+          <ol>
+            <li><a href="#overfitting">Overfitting</a></li>
+            <li><a href="#symptoms">Symptoms</a></li>
+            <li><a href="#comparing">Comparing runs</a></li>
+          </ol>
+        </li>
+      </ol>
+    </nav>
+
+    <main>
+      <h1>Training</h1>
+      <p class="lede">The settings that turn the update rule into a model that trains well, and how to read what the loss curves say. The update rules themselves are on the <a href="gradient-descent.html#optimizers">Gradient descent</a> page.</p>
+
+      <!-- ============================================================ -->
+      <h2 id="recipe">The recipe</h2>
+      <p>The standard settings for training a GPT, from GPT-3 (Brown et al., 2020) and used almost unchanged since:</p>
+      <div class="table-wrap">
+        <table class="formulas">
+          <tr><th>Setting</th><th>Value</th><th>Why</th></tr>
+          <tr><td>Optimizer</td><td>AdamW, \(\beta_1 = 0.9\), \(\beta_2 = 0.95\), \(\epsilon = 10^{-8}\)</td><td>Per-parameter step sizes; \(\beta_2\) <a href="#beta2">lower than Adam's default</a>.</td></tr>
+          <tr><td>Weight decay</td><td>\(0.1\), on matrices and embeddings only</td><td><a href="#groups">Not on biases or norm gains.</a></td></tr>
+          <tr><td>Peak learning rate</td><td>\(\sim 10^{-3}\) for small models, lower for big ones</td><td>GPT-3 used \(6 \times 10^{-4}\) at 125M parameters, down to \(0.6 \times 10^{-4}\) at 175B.</td></tr>
+          <tr><td>Warmup</td><td>Linear, from about 0, over the first few hundred steps</td><td><a href="#warmup">Adam's first steps are blunt.</a></td></tr>
+          <tr><td>Decay</td><td>Cosine, down to 10% of the peak</td><td><a href="#decay">Small steps at the end settle the model.</a></td></tr>
+          <tr><td>Gradient clipping</td><td>Global norm \(1.0\)</td><td><a href="#clipping">Caps the occasional huge gradient.</a></td></tr>
+          <tr><td>Initialisation</td><td>\(\mathcal{N}(0, 0.02^2)\)</td><td>See the <a href="gpt.html#init">GPT model</a> page.</td></tr>
+        </table>
+      </div>
+
+      <!-- ============================================================ -->
+      <h2 id="adamw">AdamW and parameter groups</h2>
+
+      <h3 id="weight-decay">Weight decay</h3>
+      <p>AdamW takes its Adam step, then shrinks every decayed weight towards zero by a fixed fraction:</p>
+      <div class="result">
+        \[ \theta \leftarrow \theta - \eta\, \frac{\hat{m}}{\sqrt{\hat{v}} + \epsilon} - \eta \lambda\, \theta \qquad\text{so each step multiplies } \theta \text{ by } (1 - \eta\lambda) \]
+      </div>
+      <p>The pull towards zero is balanced by the gradient, so weights only stay large where they earn it. That favours simpler functions and keeps weight norms from creeping up over a long run. The decay is multiplied by the learning rate \(\eta\), so it follows the schedule too. With \(\eta = 10^{-3}\) and \(\lambda = 0.1\), each step takes off 0.01%.</p>
+      <p>“Decoupled” means the shrinking is applied directly, not added to the gradient as \(\lambda\theta\). Added to the gradient, it would go through Adam's division by \(\sqrt{\hat{v}}\), and parameters with large gradients would barely be decayed at all.</p>
+
+      <h3 id="groups">What to decay</h3>
+      <p>Optimizers take <strong>parameter groups</strong>, each with its own settings. The usual split is by number of dimensions:</p>
+      <div class="table-wrap">
+        <table class="formulas">
+          <tr><th>Group</th><th>Parameters</th><th>Weight decay</th></tr>
+          <tr><td><code>p.dim() &gt;= 2</code></td><td>Weight matrices, token and position embeddings</td><td>\(\lambda\) (0.1)</td></tr>
+          <tr><td><code>p.dim() == 1</code></td><td>Biases, LayerNorm \(\gamma\) and \(\beta\)</td><td>0</td></tr>
+        </table>
+      </div>
+      <p>Decaying a LayerNorm gain pulls it towards 0, which shrinks that layer's whole output for no benefit, and biases are too few to overfit with. Whether embeddings should be decayed varies between codebases: the dimension rule decays them, and so does nanoGPT. A tied embedding matrix appears once in <code>model.parameters()</code>, so it lands in one group and gets updated once.</p>
+
+      <h3 id="beta2">Why β₂ = 0.95</h3>
+      <p>An exponential moving average with factor \(\beta\) mostly remembers the last \(1/(1 - \beta)\) steps:</p>
+      <div class="table-wrap">
+        <table class="formulas">
+          <tr><th>\(\beta\)</th><th>Remembers about</th></tr>
+          <tr><td>\(\beta_1 = 0.9\)</td><td>10 steps of gradient (the direction)</td></tr>
+          <tr><td>\(\beta_2 = 0.999\) (Adam's default)</td><td>1000 steps of squared gradient (the scale)</td></tr>
+          <tr><td>\(\beta_2 = 0.95\)</td><td>20 steps of squared gradient</td></tr>
+        </table>
+      </div>
+      <p>If gradients suddenly get bigger, a 1000-step average of their scale is still small, so the step \(\hat{m}/\sqrt{\hat{v}}\) comes out far too large. That's a common cause of loss spikes in transformers. With 0.95, the scale estimate catches up within a few dozen steps.</p>
+
+      <!-- ============================================================ -->
+      <h2 id="schedule">Learning-rate schedule</h2>
+      <div class="result">
+        \[
+        \eta(t) = \begin{cases}
+        \eta_{\max} \cdot \dfrac{t + 1}{W} & t < W \quad\text{(warmup)} \\[1.2em]
+        \eta_{\min} + (\eta_{\max} - \eta_{\min}) \cdot \tfrac{1}{2}\bigl(1 + \cos(\pi p)\bigr), \quad p = \dfrac{t - W}{T - W} & W \le t \le T \quad\text{(cosine)} \\[1em]
+        \eta_{\min} & t > T
+        \end{cases}
+        \]
+      </div>
+      <p>\(W\) is the number of warmup steps, \(T\) the total. At \(p = 0\), \(\cos 0 = 1\) gives \(\eta_{\max}\); at \(p = 1\), \(\cos \pi = -1\) gives \(\eta_{\min}\). The \(t + 1\) means the very first step isn't wasted at a learning rate of exactly 0.</p>
+      <figure class="diagram">
+        <svg viewBox="0 0 600 220" role="img" aria-label="Learning rate against step: a straight ramp from 0 to 1e-3 over the first 200 steps, then a cosine curve down to 1e-4 at step 2000.">
+          <line x1="64" x2="580" y1="180.0" y2="180.0" style="stroke: var(--border)"/>
+          <text class="muted" x="56" y="184.0" text-anchor="end">0</text>
+          <line x1="64" x2="580" y1="139.0" y2="139.0" style="stroke: var(--border)"/>
+          <text class="muted" x="56" y="143.0" text-anchor="end">2.5e-4</text>
+          <line x1="64" x2="580" y1="98.0" y2="98.0" style="stroke: var(--border)"/>
+          <text class="muted" x="56" y="102.0" text-anchor="end">5e-4</text>
+          <line x1="64" x2="580" y1="57.0" y2="57.0" style="stroke: var(--border)"/>
+          <text class="muted" x="56" y="61.0" text-anchor="end">7.5e-4</text>
+          <line x1="64" x2="580" y1="16.0" y2="16.0" style="stroke: var(--border)"/>
+          <text class="muted" x="56" y="20.0" text-anchor="end">1e-3</text>
+          <text class="muted" x="64.0" y="198" text-anchor="middle">0</text>
+          <text class="muted" x="115.6" y="198" text-anchor="middle">200</text>
+          <text class="muted" x="193.0" y="198" text-anchor="middle">500</text>
+          <text class="muted" x="322.0" y="198" text-anchor="middle">1000</text>
+          <text class="muted" x="451.0" y="198" text-anchor="middle">1500</text>
+          <text class="muted" x="580.0" y="198" text-anchor="middle">2000</text>
+          <text class="muted" x="322" y="216" text-anchor="middle">step</text>
+          <line x1="64" x2="580" y1="180" y2="180" style="stroke: var(--muted)"/>
+          <path d="M64.0,179.2 L66.6,171.0 L69.2,162.8 L71.7,154.6 L74.3,146.4 L76.9,138.2 L79.5,130.0 L82.1,121.8 L84.6,113.6 L87.2,105.4 L89.8,97.2 L92.4,89.0 L95.0,80.8 L97.5,72.6 L100.1,64.4 L102.7,56.2 L105.3,48.0 L107.9,39.8 L110.4,31.6 L113.0,23.4 L115.6,16.0 L120.8,16.0 L125.9,16.2 L131.1,16.4 L136.2,16.7 L141.4,17.1 L146.6,17.6 L151.7,18.2 L156.9,18.9 L162.0,19.6 L167.2,20.5 L172.4,21.4 L177.5,22.4 L182.7,23.5 L187.8,24.6 L193.0,25.9 L198.2,27.2 L203.3,28.6 L208.5,30.1 L213.6,31.6 L218.8,33.3 L224.0,35.0 L229.1,36.7 L234.3,38.5 L239.4,40.4 L244.6,42.4 L249.8,44.4 L254.9,46.4 L260.1,48.5 L265.2,50.7 L270.4,52.9 L275.6,55.2 L280.7,57.4 L285.9,59.8 L291.0,62.2 L296.2,64.6 L301.4,67.0 L306.5,69.5 L311.7,71.9 L316.8,74.5 L322.0,77.0 L327.2,79.5 L332.3,82.1 L337.5,84.7 L342.6,87.2 L347.8,89.8 L353.0,92.4 L358.1,94.9 L363.3,97.5 L368.4,100.1 L373.6,102.6 L378.8,105.1 L383.9,107.7 L389.1,110.1 L394.2,112.6 L399.4,115.0 L404.6,117.4 L409.7,119.8 L414.9,122.2 L420.0,124.4 L425.2,126.7 L430.4,128.9 L435.5,131.1 L440.7,133.2 L445.8,135.2 L451.0,137.2 L456.2,139.2 L461.3,141.1 L466.5,142.9 L471.6,144.6 L476.8,146.3 L482.0,148.0 L487.1,149.5 L492.3,151.0 L497.4,152.4 L502.6,153.7 L507.8,155.0 L512.9,156.1 L518.1,157.2 L523.2,158.2 L528.4,159.1 L533.6,160.0 L538.7,160.7 L543.9,161.4 L549.0,162.0 L554.2,162.5 L559.4,162.9 L564.5,163.2 L569.7,163.4 L574.8,163.6 L580.0,163.6" style="fill: none; stroke-width: 2; stroke: var(--accent)"/>
+          <text class="muted" x="122" y="172">warmup</text>
+          <text class="muted" x="420" y="60">cosine decay to min_lr</text>
+          </svg>
+        <figcaption>The schedule from my stage 5 run: \(\eta_{\max} = 10^{-3}\), \(\eta_{\min} = 10^{-4}\), 200 warmup steps, 2000 in total.</figcaption>
+      </figure>
+
+      <h3 id="warmup">Why warm up</h3>
+      <p>Adam's first steps are blunt. On step 1, \(\hat{m} = g\) and \(\hat{v} = g^2\), so the update is \(\eta\, g/|g|\): <strong>every parameter moves by exactly \(\eta\)</strong> in the direction of its gradient's sign, whether that gradient was tiny or huge (unless it's smaller than \(\epsilon\)). Over the next few steps, \(\hat{v}\) is averaged from only a handful of gradients, so the step sizes stay noisy. Meanwhile the freshly initialised model is at its most fragile.</p>
+      <p>With \(\eta = 10^{-3}\) and weights of size around \(0.02\), that first step changes every weight by 5% at once, in mostly random directions. Warmup keeps the early steps small until the statistics settle down. It matters more as models and learning rates get bigger. In a model as small as mine it mostly cost a bit of early progress (<a href="#curves">below</a>).</p>
+
+      <h3 id="decay">Why decay</h3>
+      <p>Each step uses a gradient from one random minibatch, so it's noisy, and the noise in where the parameters end up scales with the learning rate. Big steps cover ground early on. Near the end, small steps let the model settle into the bottom of the valley instead of bouncing around it. Cosine is one smooth way to get from one to the other; linear decay works about as well.</p>
+
+      <!-- ============================================================ -->
+      <h2 id="clipping">Gradient clipping</h2>
+      <p>Treat the gradients of <em>all</em> parameters as one long vector. If its length is over a limit \(c\), scale the whole thing down to length \(c\):</p>
+      <div class="result">
+        \[ \|g\| = \sqrt{\sum_{\text{all parameters}} g_i^2} \qquad\qquad g \leftarrow g \cdot \min\!\left(1,\ \frac{c}{\|g\|}\right) \]
+      </div>
+      <p>The direction is unchanged; only an unusually long step gets shortened. It goes between <code>loss.backward()</code> and <code>optimizer.step()</code>:</p>
+<pre><code>loss.backward()
+norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+optimizer.step()</code></pre>
+      <p><code>clip_grad_norm_</code> returns the norm from <em>before</em> clipping, which is worth logging: spikes in it usually come just before spikes in the loss.</p>
+
+      <!-- ============================================================ -->
+      <h2 id="curves">Reading loss curves</h2>
+      <p>My stage 4 and stage 5 runs: the same 3.2M-parameter model on tiny Shakespeare, 2000 steps. Stage 4 used AdamW with no weight decay and a constant learning rate of \(10^{-3}\). Stage 5 used the recipe above.</p>
+      <figure class="diagram">
+        <svg viewBox="0 0 600 300" role="img" aria-label="Training and validation loss for both runs from step 250 to 2000. Training loss keeps falling for both. Validation flattens out around 1.52 to 1.56 from step 1000.">
+          <line x1="64" x2="580" y1="222.5" y2="222.5" style="stroke: var(--border)"/>
+          <text class="muted" x="56" y="226.5" text-anchor="end">1.2</text>
+          <line x1="64" x2="580" y1="184.9" y2="184.9" style="stroke: var(--border)"/>
+          <text class="muted" x="56" y="188.9" text-anchor="end">1.4</text>
+          <line x1="64" x2="580" y1="147.4" y2="147.4" style="stroke: var(--border)"/>
+          <text class="muted" x="56" y="151.4" text-anchor="end">1.6</text>
+          <line x1="64" x2="580" y1="109.8" y2="109.8" style="stroke: var(--border)"/>
+          <text class="muted" x="56" y="113.8" text-anchor="end">1.8</text>
+          <line x1="64" x2="580" y1="72.3" y2="72.3" style="stroke: var(--border)"/>
+          <text class="muted" x="56" y="76.3" text-anchor="end">2.0</text>
+          <line x1="64" x2="580" y1="34.8" y2="34.8" style="stroke: var(--border)"/>
+          <text class="muted" x="56" y="38.8" text-anchor="end">2.2</text>
+          <text class="muted" x="64.0" y="278" text-anchor="middle">0</text>
+          <text class="muted" x="193.0" y="278" text-anchor="middle">500</text>
+          <text class="muted" x="322.0" y="278" text-anchor="middle">1000</text>
+          <text class="muted" x="451.0" y="278" text-anchor="middle">1500</text>
+          <text class="muted" x="580.0" y="278" text-anchor="middle">2000</text>
+          <text class="muted" x="322" y="296" text-anchor="middle">step</text>
+          <line x1="64" x2="580" y1="260" y2="260" style="stroke: var(--muted)"/>
+          <path d="M128.5,80.9 L193.0,156.8 L257.5,184.2 L322.0,197.3 L386.5,208.4 L451.0,216.6 L515.5,224.2 L580.0,230.7" style="fill: none; stroke-width: 2; stroke: var(--muted); stroke-dasharray: 6 4;"/>
+          <path d="M128.5,64.0 L193.0,124.7 L257.5,141.8 L322.0,155.1 L386.5,155.5 L451.0,159.2 L515.5,157.5 L580.0,155.5" style="fill: none; stroke-width: 2; stroke: var(--muted);"/>
+          <path d="M128.5,55.8 L193.0,144.0 L257.5,176.3 L322.0,192.6 L386.5,207.1 L451.0,218.1 L515.5,228.5 L580.0,232.8" style="fill: none; stroke-width: 2; stroke: var(--accent); stroke-dasharray: 6 4;"/>
+          <path d="M128.5,44.7 L193.0,114.5 L257.5,137.6 L322.0,155.1 L386.5,159.0 L451.0,163.2 L515.5,163.3 L580.0,163.0" style="fill: none; stroke-width: 2; stroke: var(--accent);"/>
+          <line x1="360" x2="388" y1="40" y2="40" style="stroke-width: 2; stroke: var(--muted)"/>
+          <text x="396" y="45">constant LR: validation</text>
+          <line x1="360" x2="388" y1="60" y2="60" style="stroke-width: 2; stroke: var(--muted); stroke-dasharray: 6 4"/>
+          <text x="396" y="65">constant LR: training</text>
+          <line x1="360" x2="388" y1="80" y2="80" style="stroke-width: 2; stroke: var(--accent)"/>
+          <text x="396" y="85">warmup + cosine: validation</text>
+          <line x1="360" x2="388" y1="100" y2="100" style="stroke-width: 2; stroke: var(--accent); stroke-dasharray: 6 4"/>
+          <text x="396" y="105">warmup + cosine: training</text>
+          </svg>
+        <figcaption>From step 250. Both start at 4.25 at step 0, which is \(\ln 65 = 4.17\) plus a little; see <a href="gpt.html#init-loss">why</a>.</figcaption>
+      </figure>
+      <figure class="diagram">
+        <svg viewBox="0 0 600 240" role="img" aria-label="Validation loss from step 1000. With a constant learning rate it bottoms out at 1.537 at step 1500 and rises to 1.557. With warmup and cosine decay it reaches 1.515 and stays flat.">
+          <line x1="64" x2="580" y1="200.0" y2="200.0" style="stroke: var(--border)"/>
+          <text class="muted" x="56" y="204.0" text-anchor="end">1.50</text>
+          <line x1="64" x2="580" y1="147.4" y2="147.4" style="stroke: var(--border)"/>
+          <text class="muted" x="56" y="151.4" text-anchor="end">1.52</text>
+          <line x1="64" x2="580" y1="94.9" y2="94.9" style="stroke: var(--border)"/>
+          <text class="muted" x="56" y="98.9" text-anchor="end">1.54</text>
+          <line x1="64" x2="580" y1="42.3" y2="42.3" style="stroke: var(--border)"/>
+          <text class="muted" x="56" y="46.3" text-anchor="end">1.56</text>
+          <text class="muted" x="64.0" y="218" text-anchor="middle">1000</text>
+          <text class="muted" x="193.0" y="218" text-anchor="middle">1250</text>
+          <text class="muted" x="322.0" y="218" text-anchor="middle">1500</text>
+          <text class="muted" x="451.0" y="218" text-anchor="middle">1750</text>
+          <text class="muted" x="580.0" y="218" text-anchor="middle">2000</text>
+          <text class="muted" x="322" y="236" text-anchor="middle">step</text>
+          <line x1="64" x2="580" y1="200" y2="200" style="stroke: var(--muted)"/>
+          <path d="M64.0,44.9 L193.0,50.2 L322.0,102.7 L451.0,79.1 L580.0,50.2" style="fill: none; stroke-width: 2; stroke: var(--muted);"/>
+          <path d="M64.0,44.9 L193.0,100.1 L322.0,157.9 L451.0,160.6 L580.0,155.3" style="fill: none; stroke-width: 2; stroke: var(--accent);"/>
+          <line x1="90" x2="118" y1="150" y2="150" style="stroke-width: 2; stroke: var(--muted)"/>
+          <text x="126" y="155">constant LR</text>
+          <line x1="90" x2="118" y1="170" y2="170" style="stroke-width: 2; stroke: var(--accent)"/>
+          <text x="126" y="175">warmup + cosine</text>
+          </svg>
+        <figcaption>Validation loss only, from step 1000.</figcaption>
+      </figure>
+      <div class="table-wrap">
+        <table class="formulas">
+          <tr><th>Run</th><th>Best validation</th><th>Validation at the end</th><th>Training at the end</th></tr>
+          <tr><td>Constant LR, no weight decay</td><td>1.537 (step 1500)</td><td>1.557, rising</td><td>1.156</td></tr>
+          <tr><td>Warmup + cosine, weight decay</td><td>1.515 (step 1750)</td><td>1.517, flat</td><td>1.145</td></tr>
+        </table>
+      </div>
+      <p>What the curves show:</p>
+      <ul>
+        <li><strong>Warmup costs a little early on:</strong> at step 250 the scheduled run is behind (2.147 against 2.044), having spent its first 200 steps at a low learning rate.</li>
+        <li><strong>Decay settles it at the end:</strong> as the learning rate drops, validation loss keeps improving slightly and then stays put, instead of drifting back up.</li>
+        <li><strong>The gain is modest at this size:</strong> 0.02 on the best validation loss, and 0.04 on the final one. The final model is the one that gets saved.</li>
+      </ul>
+
+      <h3 id="overfitting">Overfitting</h3>
+      <p>The gap between training and validation loss isn't the sign of overfitting by itself. Some gap is normal: here the validation text is the last 10% of the file, with different scenes and characters. The sign is <strong>validation loss rising while training loss keeps falling</strong>. The model is then learning things about the training text that don't carry over. In the constant-LR run, that happens from step 1500.</p>
+      <p>Tokens seen per step are \(B \times T = 64 \times 128 = 8192\), so 2000 steps is 16.4M tokens: about 16 passes over the 1.0M characters of training text, with 3.2 parameters per character. Plenty of room to memorise. Large language models are usually trained for about one pass over much more data, so this kind of overfitting mostly shows up in small experiments and fine-tuning.</p>
+      <p>Fixes, one at a time: stop early (keep the best checkpoint), more data, dropout, more weight decay, or a smaller model.</p>
+
+      <h3 id="symptoms">Symptoms</h3>
+      <div class="table-wrap">
+        <table class="formulas">
+          <tr><th>What you see</th><th>Likely cause</th></tr>
+          <tr><td>Starts far above \(\ln V\)</td><td>Initialisation too large; see <a href="gpt.html#init-tied">tied weights</a>.</td></tr>
+          <tr><td>Spikes, or NaN</td><td>Learning rate too high, no warmup, no clipping, or \(\beta_2\) too slow to adapt.</td></tr>
+          <tr><td>Stuck around the bigram loss (about 2.5 on tiny Shakespeare)</td><td>The model isn't using context: check attention, the mask and positions.</td></tr>
+          <tr><td>Training loss suspiciously low, generation garbage</td><td>The model can see the future: a leaky causal mask.</td></tr>
+          <tr><td>Training and validation both high and close together</td><td>Underfitting: train for longer, use a bigger model, or raise the learning rate.</td></tr>
+          <tr><td>Validation rising while training falls</td><td><a href="#overfitting">Overfitting.</a></td></tr>
+        </table>
+      </div>
+
+      <h3 id="comparing">Comparing runs</h3>
+      <ul>
+        <li><strong>Change one thing at a time,</strong> with the same data, steps and model size.</li>
+        <li><strong>Compare best validation loss</strong>, and look at the shape of the curves, not just the last number.</li>
+        <li><strong>Mind the noise:</strong> each validation figure is an average over a few batches (20 here), so differences of around 0.01 can be noise. A trend over several evaluations is real.</li>
+        <li><strong>Different random seeds</strong> move the result a little too, so a small win needs repeating before you believe it.</li>
+      </ul>
+    </main>
+  </div>
+
+  <footer class="site-footer">
+    <a href="https://github.com/catchouli/ml-cheat-sheet">Source on GitHub</a>
+  </footer>
+</body>
+</html>

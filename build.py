@@ -32,6 +32,7 @@ NAV: list[tuple[str, list[tuple[str, str]]]] = [
         ("attention.html", "Attention"),
         ("positions.html", "Positions"),
         ("gpt.html", "GPT model"),
+        ("training.html", "Training"),
     ]),
 ]
 SKIP = {"script", "style", "svg", "th"}  # plus anything with class="label"

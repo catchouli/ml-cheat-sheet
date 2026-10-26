@@ -889,5 +889,137 @@ window.SEARCH_INDEX = [
 ],
 "text": "It's a container that registers its modules' parameters, with no forward. Loop over it: for block in self.blocks: x = block(x). nn.Sequential is the callable version, but a loop is what you need once each block takes extra arguments, like a KV cache.",
 "math": ""
+},
+{
+"url": "training.html",
+"page": "Training",
+"path": [],
+"text": "The settings that turn the update rule into a model that trains well, and how to read what the loss curves say. The update rules themselves are on the Gradient descent page.",
+"math": ""
+},
+{
+"url": "training.html#recipe",
+"page": "Training",
+"path": [
+"The recipe"
+],
+"text": "The standard settings for training a GPT, from GPT-3 (Brown et al., 2020) and used almost unchanged since: Optimizer AdamW, \\(\\beta_1 = 0.9\\), \\(\\beta_2 = 0.95\\), \\(\\epsilon = 10^{-8}\\) Per-parameter step sizes; \\(\\beta_2\\) lower than Adam's default. Weight decay \\(0.1\\), on matrices and embeddings only Not on biases or norm gains. Peak learning rate \\(\\sim 10^{-3}\\) for small models, lower for big ones GPT-3 used \\(6 \\times 10^{-4}\\) at 125M parameters, down to \\(0.6 \\times 10^{-4}\\) at 175B. Warmup Linear, from about 0, over the first few hundred steps Adam's first steps are blunt. Decay Cosine, down to 10% of the peak Small steps at the end settle the model. Gradient clipping Global norm \\(1.0\\) Caps the occasional huge gradient. Initialisation \\(\\mathcal{N}(0, 0.02^2)\\) See the GPT model page.",
+"math": "beta epsilon sim times"
+},
+{
+"url": "training.html#adamw",
+"page": "Training",
+"path": [
+"AdamW and parameter groups"
+],
+"text": "",
+"math": ""
+},
+{
+"url": "training.html#weight-decay",
+"page": "Training",
+"path": [
+"AdamW and parameter groups",
+"Weight decay"
+],
+"text": "AdamW takes its Adam step, then shrinks every decayed weight towards zero by a fixed fraction: The pull towards zero is balanced by the gradient, so weights only stay large where they earn it. That favours simpler functions and keeps weight norms from creeping up over a long run. The decay is multiplied by the learning rate \\(\\eta\\), so it follows the schedule too. With \\(\\eta = 10^{-3}\\) and \\(\\lambda = 0.1\\), each step takes off 0.01%. “Decoupled” means the shrinking is applied directly, not added to the gradient as \\(\\lambda\\theta\\). Added to the gradient, it would go through Adam's division by \\(\\sqrt{\\hat{v}}\\), and parameters with large gradients would barely be decayed at all.",
+"math": "so each step multiplies   by  theta leftarrow eta sqrt epsilon lambda"
+},
+{
+"url": "training.html#groups",
+"page": "Training",
+"path": [
+"AdamW and parameter groups",
+"What to decay"
+],
+"text": "Optimizers take parameter groups, each with its own settings. The usual split is by number of dimensions: p.dim() >= 2 Weight matrices, token and position embeddings \\(\\lambda\\) (0.1) p.dim() == 1 Biases, LayerNorm \\(\\gamma\\) and \\(\\beta\\) 0 Decaying a LayerNorm gain pulls it towards 0, which shrinks that layer's whole output for no benefit, and biases are too few to overfit with. Whether embeddings should be decayed varies between codebases: the dimension rule decays them, and so does nanoGPT. A tied embedding matrix appears once in model.parameters(), so it lands in one group and gets updated once.",
+"math": "lambda gamma beta"
+},
+{
+"url": "training.html#beta2",
+"page": "Training",
+"path": [
+"AdamW and parameter groups",
+"Why β₂ = 0.95"
+],
+"text": "An exponential moving average with factor \\(\\beta\\) mostly remembers the last \\(1/(1 - \\beta)\\) steps: \\(\\beta_1 = 0.9\\) 10 steps of gradient (the direction) \\(\\beta_2 = 0.999\\) (Adam's default) 1000 steps of squared gradient (the scale) \\(\\beta_2 = 0.95\\) 20 steps of squared gradient If gradients suddenly get bigger, a 1000-step average of their scale is still small, so the step \\(\\hat{m}/\\sqrt{\\hat{v}}\\) comes out far too large. That's a common cause of loss spikes in transformers. With 0.95, the scale estimate catches up within a few dozen steps.",
+"math": "beta sqrt"
+},
+{
+"url": "training.html#schedule",
+"page": "Training",
+"path": [
+"Learning-rate schedule"
+],
+"text": "\\(W\\) is the number of warmup steps, \\(T\\) the total. At \\(p = 0\\), \\(\\cos 0 = 1\\) gives \\(\\eta_{\\max}\\); at \\(p = 1\\), \\(\\cos \\pi = -1\\) gives \\(\\eta_{\\min}\\). The \\(t + 1\\) means the very first step isn't wasted at a learning rate of exactly 0. The schedule from my stage 5 run: \\(\\eta_{\\max} = 10^{-3}\\), \\(\\eta_{\\min} = 10^{-4}\\), 200 warmup steps, 2000 in total.",
+"math": "(warmup) (cosine) eta max min bigl cos bigr"
+},
+{
+"url": "training.html#warmup",
+"page": "Training",
+"path": [
+"Learning-rate schedule",
+"Why warm up"
+],
+"text": "Adam's first steps are blunt. On step 1, \\(\\hat{m} = g\\) and \\(\\hat{v} = g^2\\), so the update is \\(\\eta\\, g/|g|\\): every parameter moves by exactly \\(\\eta\\) in the direction of its gradient's sign, whether that gradient was tiny or huge (unless it's smaller than \\(\\epsilon\\)). Over the next few steps, \\(\\hat{v}\\) is averaged from only a handful of gradients, so the step sizes stay noisy. Meanwhile the freshly initialised model is at its most fragile. With \\(\\eta = 10^{-3}\\) and weights of size around \\(0.02\\), that first step changes every weight by 5% at once, in mostly random directions. Warmup keeps the early steps small until the statistics settle down. It matters more as models and learning rates get bigger. In a model as small as mine it mostly cost a bit of early progress (below).",
+"math": "eta epsilon"
+},
+{
+"url": "training.html#decay",
+"page": "Training",
+"path": [
+"Learning-rate schedule",
+"Why decay"
+],
+"text": "Each step uses a gradient from one random minibatch, so it's noisy, and the noise in where the parameters end up scales with the learning rate. Big steps cover ground early on. Near the end, small steps let the model settle into the bottom of the valley instead of bouncing around it. Cosine is one smooth way to get from one to the other; linear decay works about as well.",
+"math": ""
+},
+{
+"url": "training.html#clipping",
+"page": "Training",
+"path": [
+"Gradient clipping"
+],
+"text": "Treat the gradients of all parameters as one long vector. If its length is over a limit \\(c\\), scale the whole thing down to length \\(c\\): The direction is unchanged; only an unusually long step gets shortened. It goes between loss.backward() and optimizer.step(): loss.backward() norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0) optimizer.step() clip_grad_norm_ returns the norm from before clipping, which is worth logging: spikes in it usually come just before spikes in the loss.",
+"math": "all parameters sqrt sum leftarrow min"
+},
+{
+"url": "training.html#curves",
+"page": "Training",
+"path": [
+"Reading loss curves"
+],
+"text": "My stage 4 and stage 5 runs: the same 3.2M-parameter model on tiny Shakespeare, 2000 steps. Stage 4 used AdamW with no weight decay and a constant learning rate of \\(10^{-3}\\). Stage 5 used the recipe above. From step 250. Both start at 4.25 at step 0, which is \\(\\ln 65 = 4.17\\) plus a little; see why. Validation loss only, from step 1000. Constant LR, no weight decay 1.537 (step 1500) 1.557, rising 1.156 Warmup + cosine, weight decay 1.515 (step 1750) 1.517, flat 1.145 What the curves show: Warmup costs a little early on: at step 250 the scheduled run is behind (2.147 against 2.044), having spent its first 200 steps at a low learning rate. Decay settles it at the end: as the learning rate drops, validation loss keeps improving slightly and then stays put, instead of drifting back up. The gain is modest at this size: 0.02 on the best validation loss, and 0.04 on the final one. The final model is the one that gets saved.",
+"math": ""
+},
+{
+"url": "training.html#overfitting",
+"page": "Training",
+"path": [
+"Reading loss curves",
+"Overfitting"
+],
+"text": "The gap between training and validation loss isn't the sign of overfitting by itself. Some gap is normal: here the validation text is the last 10% of the file, with different scenes and characters. The sign is validation loss rising while training loss keeps falling. The model is then learning things about the training text that don't carry over. In the constant-LR run, that happens from step 1500. Tokens seen per step are \\(B \\times T = 64 \\times 128 = 8192\\), so 2000 steps is 16.4M tokens: about 16 passes over the 1.0M characters of training text, with 3.2 parameters per character. Plenty of room to memorise. Large language models are usually trained for about one pass over much more data, so this kind of overfitting mostly shows up in small experiments and fine-tuning. Fixes, one at a time: stop early (keep the best checkpoint), more data, dropout, more weight decay, or a smaller model.",
+"math": "times"
+},
+{
+"url": "training.html#symptoms",
+"page": "Training",
+"path": [
+"Reading loss curves",
+"Symptoms"
+],
+"text": "Starts far above \\(\\ln V\\) Initialisation too large; see tied weights. Spikes, or NaN Learning rate too high, no warmup, no clipping, or \\(\\beta_2\\) too slow to adapt. Stuck around the bigram loss (about 2.5 on tiny Shakespeare) The model isn't using context: check attention, the mask and positions. Training loss suspiciously low, generation garbage The model can see the future: a leaky causal mask. Training and validation both high and close together Underfitting: train for longer, use a bigger model, or raise the learning rate. Validation rising while training falls Overfitting.",
+"math": "beta"
+},
+{
+"url": "training.html#comparing",
+"page": "Training",
+"path": [
+"Reading loss curves",
+"Comparing runs"
+],
+"text": "Change one thing at a time, with the same data, steps and model size. Compare best validation loss, and look at the shape of the curves, not just the last number. Mind the noise: each validation figure is an average over a few batches (20 here), so differences of around 0.01 can be noise. A trend over several evaluations is real. Different random seeds move the result a little too, so a small win needs repeating before you believe it.",
+"math": ""
 }
 ];
